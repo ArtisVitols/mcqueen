@@ -289,7 +289,8 @@ button.big.ghost {
   pointer-events: auto;
 }
 .pad-left { left: calc(14px + var(--safe-l)); }
-.pad-right { right: calc(14px + var(--safe-r)); flex-direction: column-reverse; }
+/* Gas on top, brake underneath. */
+.pad-right { right: calc(14px + var(--safe-r)); flex-direction: column; }
 
 .ctl {
   /* Generous targets - these are for a five-year-old's thumbs, and the floor
@@ -315,6 +316,26 @@ button.big.ghost {
 .ctl.brake.down { background: rgba(240, 50, 60, 0.7); }
 
 /* ----------------------------------------------------------- rotate nudge */
+
+#btn-pause {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: calc(96px + var(--safe-l));
+  pointer-events: auto;
+  width: clamp(38px, 8vh, 52px);
+  height: clamp(30px, 6.4vh, 42px);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(8, 12, 22, 0.62);
+  color: #fff;
+  font-size: clamp(11px, 2.2vh, 15px);
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+#btn-pause:active { background: rgba(255, 255, 255, 0.3); }
+
+.pause-row { display: flex; gap: 8px; width: 100%; }
+.pause-row .big { flex: 1; padding-left: 0; padding-right: 0; font-size: clamp(13px, 2.6vh, 19px); }
 
 #rotate {
   position: fixed;

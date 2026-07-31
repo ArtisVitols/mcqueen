@@ -8,13 +8,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>McQueen Speedway</title>
-<link rel="stylesheet" href="styles.css?v=20260731-1710-129d0e1">
+<link rel="stylesheet" href="styles.css?v=20260731-1802-a90b090">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>">
 <!-- Stamped by tools/stamp_version.py on every deploy. GitHub Pages serves
      everything with max-age=600, so without this a phone can hold a new
      track-data.json alongside the previous track.glb for ten minutes - which
      is exactly how you end up with cars floating over a flattened road. -->
-<script>window.__BUILD__ = '20260731-1710-129d0e1';</script>
+<script>window.__BUILD__ = '20260731-1802-a90b090';</script>
 <script type="importmap">
 {
   "imports": {
@@ -71,6 +71,11 @@
         <label class="row-label">Volume</label>
         <input id="opt-volume" type="range" min="0" max="100" value="80">
         <button id="btn-back" class="big">BACK</button>
+        <div id="pause-actions" class="pause-row hidden">
+          <button id="btn-resume" class="big">RESUME</button>
+          <button id="btn-restart" class="big">RESTART</button>
+          <button id="btn-quit" class="big ghost">MENU</button>
+        </div>
       </div>
     </div>
   </div>
@@ -107,6 +112,9 @@
     <button class="ctl gas"   data-action="gas"   aria-label="Go">▲</button>
     <button class="ctl brake" data-action="brake" aria-label="Brake">▼</button>
   </div>
+  <!-- Pause lives with the controls, not the HUD, because the HUD ignores
+       pointer events so it never steals a thumb mid-corner. -->
+  <button id="btn-pause" aria-label="Pause and change settings">❚❚</button>
 </div>
 
 <!-- results --------------------------------------------------------------- -->
@@ -131,6 +139,6 @@
   </div>
 </div>
 
-<script type="module" src="src/main.js?v=20260731-1710-129d0e1"></script>
+<script type="module" src="src/main.js?v=20260731-1802-a90b090"></script>
 </body>
 </html>

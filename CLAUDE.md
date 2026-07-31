@@ -158,6 +158,18 @@ entry is correct; a car floating over the gap is not.
   no longer has. `index.html` carries a build id and `assetUrl()` stamps every
   request with it. **Run `python3 tools/stamp_version.py` before every deploy.**
   The menu shows the build id; ask for it before debugging a phone report.
+- **Never screenshot a page to get a coordinate system.** `tools/topdown.mjs`
+  renders inside `tools/smoke.html`, whose CSS sets `body { padding: 14px }`.
+  Every overhead pass came out shifted by 14 px - about 6 m once a 1:15 model
+  is scaled up, most of a road width - so the extracted racing line ran along
+  the grass verge on two circuits while every image-space check said it was
+  perfectly centred. It now reads `renderer.domElement.toDataURL()` instead.
+  If an image is a coordinate system, take it from the canvas.
+- **A radial trace plus a low-pass is only a starting guess.** A rounded
+  rectangle's radius function has real high-frequency content; 12 harmonics of
+  it wanders metres off a 12 m road. `extract_oval.py` snaps the line onto the
+  road mask afterwards, sliding each station to the middle of the strip it
+  sits in. Do not remove that pass.
 - **Untextured renders are not enough to judge which way a car faces.** Reading
   a grey silhouette wrong had Chick Hicks racing backwards for a release. These
   characters have eyes on the windscreen — render textured and look.
@@ -176,6 +188,10 @@ node tools/shots.mjs               # full game flow in headless Chrome
 node tools/shots_tracks.mjs        # ... on each circuit
 node tools/check_ride_height.mjs   # gap between each car and the road
 node tools/diag_cars.mjs <track>   # car facing + wheels on a reference plane
+node tools/lap_tour.mjs <track>    # chase cam all the way round a lap
+node tools/cross_section.mjs <t>   # what surface is under each lane, per station
+node tools/test_pause.mjs          # in-race pause menu, controls layout
+python3 tools/overlay_line.py <t>  # racing line drawn on the overhead render
 python3 tools/stamp_version.py --check
 ```
 
@@ -187,19 +203,32 @@ What "good" looks like right now:
 - `simulate.mjs all` — 9 OK. Easy is P1 on every circuit, Hard beats a
   throttle-pinned player on every circuit. If Easy stops being a win, that is a
   regression regardless of what else improved.
-- `verify_track.mjs` — median height error 35 mm / 0 mm / 36 mm. The **median**
-  is the signal that catches systemic drift; the tail is per-track in
-  `tracks.json` because Motor Speedway has a real step in its source mesh at
-  the pit merge.
+- `verify_track.mjs` — median height error 27 mm / 99 mm / 36 mm, and under
+  0.2% of points past 0.5 m on all three. The **median** is the signal that
+  catches systemic drift.
 - A session downloads ~3.5 MB and reaches the menu in about 5 s, because only
   the selected circuit loads. `assets/` totals ~9 MB across all three; the
   420k-triangle Yoyleland model is 5.9 MB of that and only arrives if picked.
   `loadTrackById` disposes the previous track — do not start caching all three
   on a phone.
 
-**Look at the screenshots.** Every bug the owner reported was visible in an
-image and invisible in the numbers. When checking geometry, put a reference
-plane in the scene rather than eyeballing a gap — `diag_cars.mjs` does this.
+**Look at the screenshots, and look at more than one.** Every bug the owner
+reported was visible in an image and invisible in the numbers. Checking one
+spot proves nothing either: a racing line can sit perfectly on the asphalt at
+the start line and run through the infield in turn three, which is exactly
+what happened. `tools/lap_tour.mjs` shoots the chase camera all the way round
+a lap and `tools/cross_section.mjs` reports what surface is under each lane -
+use both before believing a track is right. When checking geometry, put a
+reference plane in the scene rather than eyeballing a gap; `diag_cars.mjs`
+does this.
+
+**Cars must look planted.** A shadow map alone does not do it: it is off on
+Low quality and barely registers on dark asphalt. Every car carries a contact
+shadow quad (`contactShadow` in `models.js`). Yoyleland's tarmac is untextured
+and washes out pale under a strong sun, hiding both the banking and the
+shadows, so `tracks.json` names its asphalt materials for restyling. And if
+you touch the sun's shadow frustum, call `updateProjectionMatrix()` — without
+it three.js keeps the constructed ±5 default and shadows silently vanish.
 
 ## Deploying
 

@@ -64,6 +64,7 @@ export async function loadCar(spec) {
   const pivot = new THREE.Group();
   pivot.name = spec.id;
   pivot.add(inner);
+  pivot.add(contactShadow(size.x * scale, size.z * scale));
 
   pivot.traverse((o) => {
     if (!o.isMesh) return;
@@ -82,7 +83,7 @@ export async function loadCar(spec) {
   };
 }
 
-export async function loadTrack(file, scale = 1, onProgress) {
+export async function loadTrack(file, scale = 1, onProgress, asphalt = []) {
   const gltf = await loadGLTF(assetUrl(file), onProgress);
   const scene = gltf.scene;
   scene.scale.setScalar(scale);
@@ -98,6 +99,14 @@ export async function loadTrack(file, scale = 1, onProgress) {
       // One circuit hides an alpha-0 collision shell above the road. Leaving
       // it visible makes the track look fogged from inside.
       if (m.transparent && m.opacity === 0) o.visible = false;
+      // Untextured tarmac lit by a strong sun goes pale and flat, which hides
+      // the banking and swallows the cars' shadows. Give it a real asphalt
+      // tone and a matte finish so light and shade read on it.
+      if (asphalt.includes(m.name)) {
+        m.color?.setHex(0x43464a);
+        if (m.roughness !== undefined) m.roughness = 0.97;
+        if (m.metalness !== undefined) m.metalness = 0.0;
+      }
     }
   });
   scene.updateMatrixWorld(true);
@@ -122,4 +131,45 @@ export function disposeTrack(scene) {
 
 function materialsOf(mesh) {
   return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+}
+
+let shadowTexture = null;
+
+/**
+ * A soft dark patch that rides under a car, flat on the track.
+ *
+ * The shadow map alone is not enough to sell contact: it is off entirely on
+ * Low quality, and on dark asphalt a soft shadow barely registers, which
+ * leaves the car looking like it is hovering. This blob is always there,
+ * costs one transparent quad, and is what actually plants the car.
+ */
+function contactShadow(width, length) {
+  if (!shadowTexture) {
+    const s = 128;
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0, 'rgba(0,0,0,0.72)');
+    g.addColorStop(0.55, 'rgba(0,0,0,0.42)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, s, s);
+    shadowTexture = new THREE.CanvasTexture(c);
+    shadowTexture.colorSpace = THREE.SRGBColorSpace;
+  }
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(width * 1.5, length * 1.15),
+    new THREE.MeshBasicMaterial({
+      map: shadowTexture,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.85,
+    }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.03;          // just clear of the road to avoid z-fighting
+  mesh.renderOrder = 1;
+  mesh.name = 'contact-shadow';
+  return mesh;
 }

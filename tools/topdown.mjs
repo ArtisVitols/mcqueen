@@ -45,6 +45,21 @@ await page.setViewport({ width: SIZE, height: SIZE });
 page.on('pageerror', (e) => { console.log('pageerror:', e.message); process.exitCode = 1; });
 await page.goto(`http://127.0.0.1:${PORT}/tools/smoke.html`, { waitUntil: 'domcontentloaded' });
 
+/**
+ * Read the WebGL canvas itself, never a page screenshot.
+ *
+ * These images are a coordinate system: extract_oval.py maps pixels straight
+ * back to world metres. A page screenshot includes whatever the host page's
+ * CSS does to the canvas, and tools/smoke.html sets `body { padding: 14px }`.
+ * That silently shifted every overhead pass by 14 px - about 6 m once scaled -
+ * which is most of a road width, and put the cars on the grass.
+ */
+async function grab(file) {
+  const data = await page.evaluate(() =>
+    window.__ctx.renderer.domElement.toDataURL('image/png'));
+  writeFileSync(join(BUILD, file), Buffer.from(data.split(',')[1], 'base64'));
+}
+
 const meta = await page.evaluate(async (url, size) => {
   const THREE = await import('three');
   const { loadGLTF } = await import('../src/models.js');
@@ -94,8 +109,7 @@ const meta = await page.evaluate(async (url, size) => {
   };
 }, file, SIZE);
 
-await new Promise((r) => setTimeout(r, 400));
-await page.screenshot({ path: join(BUILD, `${name}_colour.png`) });
+await grab(`${name}_colour.png`);
 
 // Height pass: pack world Y into 24 bits of RGB, no lighting or tone mapping.
 await page.evaluate(async (yMin, yMax) => {
@@ -129,8 +143,7 @@ await page.evaluate(async (yMin, yMax) => {
   renderer.render(scene, cam);
 }, meta.yMin, meta.yMax);
 
-await new Promise((r) => setTimeout(r, 400));
-await page.screenshot({ path: join(BUILD, `${name}_height.png`) });
+await grab(`${name}_height.png`);
 
 // Material-ID pass: each material a distinct flat colour. Reading the road
 // straight off this is exact, where classifying by colour or height guesses.
@@ -166,8 +179,7 @@ meta.materials = await page.evaluate(async () => {
   return legend;
 });
 
-await new Promise((r) => setTimeout(r, 400));
-await page.screenshot({ path: join(BUILD, `${name}_id.png`) });
+await grab(`${name}_id.png`);
 
 writeFileSync(join(BUILD, `${name}_meta.json`), JSON.stringify(meta, null, 1));
 console.log(name, JSON.stringify({

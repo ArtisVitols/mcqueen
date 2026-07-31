@@ -93,7 +93,7 @@ class Game {
     const track = await Track.load(assetUrl(spec.data));
     const scene = await loadTrack(spec.model, track.modelScale, (e) => {
       if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
-    });
+    }, spec.asphalt || []);
     if (this.trackScene) {
       this.scene.remove(this.trackScene);
       disposeTrack(this.trackScene);
@@ -117,7 +117,7 @@ class Game {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = 1.0;
     this.renderer = renderer;
 
     const scene = new THREE.Scene();
@@ -128,17 +128,22 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, 2, 0.6, 3200);
     scene.add(this.camera);
 
-    const sun = new THREE.DirectionalLight(0xfff3e0, 2.6);
+    const sun = new THREE.DirectionalLight(0xfff2dd, 3.1);
     sun.position.set(-320, 420, 260);
     sun.castShadow = q.shadows;
     if (q.shadows) {
-      sun.shadow.mapSize.set(1024, 1024);
-      sun.shadow.camera.near = 10;
-      sun.shadow.camera.far = 340;
-      const r = 70;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.near = 20;
+      sun.shadow.camera.far = 320;
+      // Tight box around the player: 1024 texels over the old 140 m spread
+      // barely registered a car. 44 m gives ~2 cm texels.
+      const r = 22;
       Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r });
-      sun.shadow.bias = -0.002;
-      sun.shadow.normalBias = 0.6;
+      sun.shadow.bias = -0.0006;
+      sun.shadow.normalBias = 0.12;
+      // Without this the frustum stays at its constructed +/-5 default and the
+      // shadows quietly never appear.
+      sun.shadow.camera.updateProjectionMatrix();
     }
     scene.add(sun);
     this.sun = sun;
@@ -146,7 +151,10 @@ class Game {
     scene.add(this.sunTarget);
     sun.target = this.sunTarget;
 
-    scene.add(new THREE.HemisphereLight(0xbfdcff, 0x53504a, 1.5));
+    // Less flat fill than before: the sun has to win, or a shadow on dark
+    // asphalt is invisible and the cars look pasted on.
+    scene.add(new THREE.HemisphereLight(0xbcd8ff, 0x4a4741, 0.85));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.25));
     this.resize();
   }
 
@@ -180,6 +188,16 @@ class Game {
     };
     dom('btn-menu').onclick = () => this.toMenu();
     dom('btn-again').onclick = () => this.startRace();
+    dom('btn-pause').onclick = () => this.pauseRace();
+    dom('btn-resume').onclick = () => this.resumeRace();
+    dom('btn-restart').onclick = () => {
+      this.closePauseOverlay();
+      this.startRace();
+    };
+    dom('btn-quit').onclick = () => {
+      this.closePauseOverlay();
+      this.toMenu();
+    };
 
     this.buildCarPicker();
     this.buildTrackPicker();
@@ -200,7 +218,8 @@ class Game {
         this.settings.car = spec.id;
         Settings.save(this.settings);
         this.syncCarPicker();
-        this.setIdleCar(spec.id);
+        if (this.paused) this.requireRestart();
+        else this.setIdleCar(spec.id);
       };
       wrap.appendChild(b);
     }
@@ -241,7 +260,8 @@ class Game {
       await this.loadTrackById(id);
       Settings.save(this.settings);
       this.syncTrackPicker();
-      this.startIdleCamera();
+      if (this.paused) this.requireRestart();
+      else this.startIdleCamera();
     } catch (err) {
       console.error(err);
     } finally {
@@ -311,16 +331,72 @@ class Game {
     this.scene.traverse((o) => { if (o.isMesh) o.material.needsUpdate = true; });
   }
 
-  showOptions() {
+  /**
+   * @param {boolean} fromRace  true when opened with the pause button, which
+   *   swaps BACK for resume/restart/menu and keeps the race frozen behind it.
+   */
+  showOptions(fromRace = false) {
+    this.optionsFromRace = fromRace;
     dom('menu').classList.add('hidden');
     dom('options').classList.remove('hidden');
+    dom('btn-back').classList.toggle('hidden', fromRace);
+    dom('pause-actions').classList.toggle('hidden', !fromRace);
+    dom('btn-resume').classList.remove('hidden');
+  }
+
+  /**
+   * Called when a paused change - a different car or circuit - makes the
+   * frozen race meaningless. Resuming into it would put the player in the
+   * wrong car or on the wrong track, so that door is closed.
+   */
+  requireRestart() {
+    this.race = null;
+    dom('btn-resume').classList.add('hidden');
+  }
+
+  pauseRace() {
+    if (!this.race || this.paused) return;
+    this.paused = true;
+    cancelAnimationFrame(this.raf);
+    this.input.reset();
+    this.audio.silenceEngines();
+    dom('hud').classList.add('hidden');
+    dom('controls').classList.add('hidden');
+    this.showOptions(true);
+  }
+
+  closePauseOverlay() {
+    Settings.save(this.settings);
+    dom('options').classList.add('hidden');
+    dom('pause-actions').classList.add('hidden');
+    dom('btn-back').classList.remove('hidden');
+    this.paused = false;
+  }
+
+  resumeRace() {
+    if (!this.race) return this.toMenu();
+    this.closePauseOverlay();
+    dom('hud').classList.remove('hidden');
+    dom('controls').classList.remove('hidden');
+    // Laps or difficulty may have changed; apply what can be applied live.
+    this.race.totalLaps = this.settings.laps;
+    for (const car of this.race.field) car.totalLaps = this.settings.laps;
+    this.hud.setLaps(this.settings.laps);
+    this.audio.setEnabled(this.settings.sound);
+    this.audio.setVolume(this.settings.volume);
+    this._last = performance.now();
+    this.loop(this._last);
   }
 
   toMenu() {
     cancelAnimationFrame(this.raf);
+    this.paused = false;
     this.race = null;
     this.audio.silenceEngines();
     dom('result').classList.add('hidden');
+    dom('options').classList.add('hidden');
+    dom('pause-actions').classList.add('hidden');
+    dom('btn-back').classList.remove('hidden');
     dom('hud').classList.add('hidden');
     dom('controls').classList.add('hidden');
     dom('menu').classList.remove('hidden');
@@ -387,8 +463,11 @@ class Game {
 
   async startRace() {
     cancelAnimationFrame(this.raf);
+    this.paused = false;
     dom('menu').classList.add('hidden');
     dom('options').classList.add('hidden');
+    dom('pause-actions').classList.add('hidden');
+    dom('btn-back').classList.remove('hidden');
     dom('result').classList.add('hidden');
     dom('hud').classList.remove('hidden');
     dom('controls').classList.remove('hidden');
@@ -460,6 +539,7 @@ class Game {
   }
 
   loop(now) {
+    if (this.paused) return;
     this.raf = requestAnimationFrame((t) => this.loop(t));
     const dt = Math.min(0.1, (now - (this._last || now)) / 1000);
     this._last = now;

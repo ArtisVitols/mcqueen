@@ -1,5 +1,5 @@
 {
-  "_comment": "Each track's data file carries a modelScale: the two smaller circuits are modelled at roughly 1:15, and the game scales both the model and the extracted racing line by the same factor so every road is about 18 m wide and the cars stay life-sized. roadMaterials lists the materials that make up the racing surface; tools/verify_track.mjs asserts the surface under the racing line is one of them.",
+  "_comment": "Each track's data file carries a modelScale: the two smaller circuits are modelled at roughly 1:15, and the game scales both the model and the extracted racing line by the same factor so every road is about 18 m wide and the cars stay life-sized. roadMaterials lists the materials that make up the racing surface; tools/verify_track.mjs asserts the surface under the racing line is one of them. asphalt (optional) names materials to restyle as road surface: the Yoyleland tarmac is untextured and washes out to a pale brown under the sun, which hides both the banking and the cars' shadows.",
   "tracks": [
     {
       "id": "msots",
@@ -14,8 +14,7 @@
         "Material.076",
         "Material.110"
       ],
-      "maxOutlierFraction": 0.04,
-      "note": "The source mesh has a step where the pit lane merges, around a 40 m stretch of the 1455 m lap, that no smooth centreline follows exactly."
+      "maxOutlierFraction": 0.01
     },
     {
       "id": "palm",
@@ -48,7 +47,12 @@
         "Finish_Line",
         "material"
       ],
-      "maxOutlierFraction": 0.01
+      "maxOutlierFraction": 0.01,
+      "asphalt": [
+        "Asphalt",
+        "Asphalt.001",
+        "Asphalt.002"
+      ]
     }
   ]
 }

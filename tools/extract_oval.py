@@ -113,6 +113,87 @@ def resample(pts, count):
     return out, total
 
 
+def frames(pts, cx, cy):
+    """Unit tangent and outward normal at every point of a closed polyline."""
+    n = len(pts)
+    out = []
+    for i, (x, y) in enumerate(pts):
+        ax, ay = pts[(i + 1) % n]
+        bx, by = pts[(i - 1) % n]
+        tx, ty = ax - bx, ay - by
+        tl = math.hypot(tx, ty) or 1.0
+        tx, ty = tx / tl, ty / tl
+        nx, ny = -ty, tx
+        if nx * (x - cx) + ny * (y - cy) < 0:
+            nx, ny = -nx, -ny
+        out.append((tx, ty, nx, ny))
+    return out
+
+
+def road_span(mask, x, y, nx, ny, reach=90.0):
+    """Extent of the contiguous run of road through (x, y) along the normal.
+
+    Returns (inward, outward) distances, or None if no road is within reach.
+    """
+    here = (int(x), int(y)) in mask
+    if not here:
+        # Not on the road: hunt for the nearest edge either way, then use it.
+        best = None
+        d = 0.5
+        while d < reach:
+            for sign in (1, -1):
+                if (int(x + nx * sign * d), int(y + ny * sign * d)) in mask:
+                    best = sign * d
+                    break
+            if best is not None:
+                break
+            d += 0.5
+        if best is None:
+            return None
+        x, y = x + nx * best, y + ny * best
+
+    def walk(sign):
+        d, last, gap = 0.0, 0.0, 0.0
+        while d < reach:
+            d += 0.5
+            if (int(x + nx * sign * d), int(y + ny * sign * d)) in mask:
+                gap, last = 0.0, d
+            else:
+                gap += 0.5
+                if gap > 1.5:
+                    break
+        return last
+
+    # (x, y) is now guaranteed to be on the road; distances are relative to it.
+    return walk(-1), walk(1), (x, y)
+
+
+def snap_to_mask(pts, mask, cx, cy, passes=6):
+    """Slide each station to the middle of the road strip it sits in."""
+    n = len(pts)
+    for _ in range(passes):
+        fr = frames(pts, cx, cy)
+        moved = []
+        for i, (x, y) in enumerate(pts):
+            _, _, nx, ny = fr[i]
+            span = road_span(mask, x, y, nx, ny)
+            if span is None:
+                moved.append((x, y))
+                continue
+            in_d, out_d, (ox_, oy_) = span
+            shift = (out_d - in_d) * 0.5
+            moved.append((ox_ + nx * shift, oy_ + ny * shift))
+        # Gentle smoothing keeps the line clean without pulling it off the road.
+        half = 4
+        smoothed = []
+        for i in range(n):
+            sx = sum(moved[(i + k) % n][0] for k in range(-half, half + 1))
+            sy = sum(moved[(i + k) % n][1] for k in range(-half, half + 1))
+            smoothed.append((sx / (2 * half + 1), sy / (2 * half + 1)))
+        pts, total = resample(smoothed, n)
+    return pts, total
+
+
 def main():
     name = sys.argv[1]
     cfg = TRACKS[name]
@@ -199,6 +280,16 @@ def main():
         raw.append((cx + math.cos(a) * r, cy + math.sin(a) * r))
     centre_px, lap_px = resample(raw, STATIONS)
 
+    # The radial trace plus a low-pass is only a starting guess. A rounded
+    # rectangle's radius function has real high-frequency content, and 12
+    # harmonics of it wander metres off a road that is only 12 m wide once
+    # scaled - enough to put the centreline on the grass in one corner and on
+    # the wall in another. So snap it onto the mask: at every station, slide
+    # sideways to the middle of the strip of road the station sits in, smooth
+    # gently, re-space, repeat. This locks the line to the road rather than to
+    # an idealised oval.
+    centre_px, lap_px = snap_to_mask(centre_px, mask, cx, cy)
+
     band = sorted(outer[i] - inner[i] for i in range(RAYS))
     model_width = band[RAYS // 2] * mpp
     scale = TARGET_WIDTH / model_width
@@ -219,18 +310,8 @@ def main():
         if nx * (px - cx) + ny * (py - cy) < 0:
             nx, ny = -nx, -ny
 
-        def edge(sign):
-            d, gap, last = 0.0, 0.0, 0.0
-            while d < reach:
-                d += 0.5
-                if (int(px + nx * sign * d), int(py + ny * sign * d)) in mask:
-                    gap, last = 0.0, d
-                else:
-                    gap += 0.5
-                    if gap > 2.0:
-                        break
-            return last
-        out_d, in_d = edge(1), edge(-1)
+        span = road_span(mask, px, py, nx, ny)
+        in_d, out_d = (span[0], span[1]) if span else (4.0, 4.0)
 
         hc = height_at(px, py)
         ho = height_at(px + nx * out_d * 0.8, py + ny * out_d * 0.8)
