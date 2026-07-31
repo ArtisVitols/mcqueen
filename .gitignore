@@ -1,0 +1,11 @@
+# Source models downloaded from Google Drive - run tools/fetch_assets.sh to
+# get them back. Only the compressed output in assets/ is committed.
+raw/
+
+# Local-only toolchains
+tools/node/
+node_modules/
+
+# Python bytecode
+__pycache__/
+*.pyc

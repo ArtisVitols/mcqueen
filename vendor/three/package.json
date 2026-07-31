@@ -1,0 +1,11 @@
+{
+  "name": "three",
+  "version": "0.180.0",
+  "type": "module",
+  "main": "three.module.min.js",
+  "exports": {
+    ".": "./three.module.min.js",
+    "./*": "./*"
+  },
+  "_comment": "The browser resolves 'three' through the importmap in index.html; this file exists so tools/simulate.mjs can import the same vendored copy under Node."
+}

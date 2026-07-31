@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>McQueen Speedway</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js",
+    "three/": "./vendor/three/"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<!-- loading ------------------------------------------------------------- -->
+<div id="loading" class="screen">
+  <h1 class="logo">McQUEEN<span>SPEEDWAY</span></h1>
+  <div class="progress"><div id="loading-bar"></div></div>
+  <p id="loading-status">Starting engines…</p>
+</div>
+
+<!-- main menu ------------------------------------------------------------ -->
+<div id="menu" class="screen hidden">
+  <h1 class="logo">McQUEEN<span>SPEEDWAY</span></h1>
+  <p class="driving">Driving: <b id="menu-car">Lightning McQueen</b></p>
+  <div class="menu-buttons">
+    <button id="btn-start" class="big">START</button>
+    <button id="btn-options" class="big ghost">OPTIONS</button>
+  </div>
+</div>
+
+<!-- options -------------------------------------------------------------- -->
+<div id="options" class="screen hidden">
+  <div class="panel">
+    <h2>Options</h2>
+
+    <label class="row-label">Your car</label>
+    <div id="car-picker" class="cards"></div>
+
+    <div class="opt-grid">
+      <div><label class="row-label">Laps</label><div id="opt-laps" class="pills"></div></div>
+      <div><label class="row-label">Difficulty</label><div id="opt-difficulty" class="pills"></div></div>
+      <div><label class="row-label">Graphics</label><div id="opt-quality" class="pills"></div></div>
+      <div><label class="row-label">Sound</label><div id="opt-sound" class="pills"></div></div>
+    </div>
+
+    <label class="row-label">Volume</label>
+    <input id="opt-volume" type="range" min="0" max="100" value="80">
+
+    <button id="btn-back" class="big">BACK</button>
+  </div>
+</div>
+
+<!-- heads-up display ------------------------------------------------------ -->
+<div id="hud" class="hidden">
+  <div class="hud-box hud-lap">
+    <span class="hud-label">LAP</span>
+    <span class="hud-value"><b id="lap-now">1</b>/<span id="lap-total">3</span></span>
+  </div>
+  <div class="hud-box hud-place">
+    <span class="hud-label">POS</span>
+    <span class="hud-value"><b id="place">7</b>/<span id="place-total">7</span></span>
+  </div>
+  <div class="hud-box hud-speed">
+    <span class="hud-value"><b id="speed">0</b></span>
+    <span class="hud-label">KM/H</span>
+  </div>
+  <div id="lights" class="hidden">
+    <div class="bulb"></div><div class="bulb"></div><div class="bulb"></div>
+    <div class="bulb"></div><div class="bulb"></div>
+  </div>
+  <div id="flash"></div>
+</div>
+
+<!-- touch controls -------------------------------------------------------- -->
+<div id="controls" class="hidden">
+  <div class="pad pad-left">
+    <button class="ctl" data-action="left"  aria-label="Steer left">◀</button>
+    <button class="ctl" data-action="right" aria-label="Steer right">▶</button>
+  </div>
+  <div class="pad pad-right">
+    <button class="ctl gas"   data-action="gas"   aria-label="Go">▲</button>
+    <button class="ctl brake" data-action="brake" aria-label="Brake">▼</button>
+  </div>
+</div>
+
+<!-- results --------------------------------------------------------------- -->
+<div id="result" class="screen hidden">
+  <div class="panel">
+    <h2 id="result-title">YOU WIN!</h2>
+    <p id="result-sub"></p>
+    <ol id="result-order" class="order"></ol>
+    <div class="menu-buttons row">
+      <button id="btn-again" class="big">RACE AGAIN</button>
+      <button id="btn-menu" class="big ghost">MENU</button>
+    </div>
+  </div>
+</div>
+
+<!-- rotate nag ------------------------------------------------------------ -->
+<div id="rotate" class="hidden">
+  <div>
+    <!-- Drawn in CSS rather than as an emoji so it renders on every device. -->
+    <div class="phone-icon"></div>
+    Turn your phone sideways
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

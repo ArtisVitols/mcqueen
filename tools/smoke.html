@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>smoke</title>
+<style>
+  body { background:#10131a; color:#d8dee9; font:13px/1.5 ui-monospace,monospace; padding:14px; margin:0 }
+  .ok { color:#7ee787 } .bad { color:#ff7b72 } h1 { font-size:15px; margin:0 0 10px }
+  td { padding:1px 12px 1px 0; vertical-align:top }
+</style>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/": "../vendor/three/" } }
+</script>
+</head>
+<body>
+<h1>McQueen Speedway - asset smoke test</h1>
+<table id="out"></table>
+
+<script type="module">
+// Verifies everything the game needs at load time except the WebGL context:
+// the importmap, the vendored three build, GLTFLoader + the meshopt decoder,
+// every asset file, and the bounding-box normalisation each car relies on.
+// Runs headless because none of it touches a renderer.
+const rows = [];
+const out = document.getElementById('out');
+let failures = 0;
+
+function log(name, ok, detail = '') {
+  if (!ok) failures++;
+  rows.push(`<tr><td class="${ok ? 'ok' : 'bad'}">${ok ? 'PASS' : 'FAIL'}</td>
+             <td>${name}</td><td>${detail}</td></tr>`);
+  out.innerHTML = rows.join('');
+}
+
+async function check(name, fn) {
+  try {
+    log(name, true, (await fn()) ?? '');
+  } catch (err) {
+    log(name, false, err.message);
+  }
+}
+
+const THREE = await import('three');
+await check('three.js loads', () => THREE.REVISION && `r${THREE.REVISION}`);
+
+const { loadCar, loadTrack, assetUrl } = await import('../src/models.js');
+const { Track } = await import('../src/track.js');
+
+await check('track-data.json', async () => {
+  const t = await Track.load(assetUrl('track-data.json'));
+  window.__track = t;
+  const widths = t.data.outW.map((o, i) => o + t.data.inW[i]);
+  return `${t.lapLength.toFixed(0)} m lap, ${t.count} stations, ` +
+         `width ${Math.min(...widths).toFixed(1)}-${Math.max(...widths).toFixed(1)} m`;
+});
+
+await check('track.glb', async () => {
+  const scene = await loadTrack();
+  let tris = 0, meshes = 0;
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    meshes++;
+    const g = o.geometry;
+    tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+  });
+  const box = new THREE.Box3().setFromObject(scene);
+  const s = new THREE.Vector3(); box.getSize(s);
+  return `${meshes} meshes, ${Math.round(tris).toLocaleString()} tris, ` +
+         `${s.x.toFixed(0)} x ${s.y.toFixed(0)} x ${s.z.toFixed(0)} m`;
+});
+
+const manifest = await (await fetch(assetUrl('cars.json'))).json();
+await check('cars.json', () => `${manifest.cars.length} cars`);
+
+for (const spec of manifest.cars) {
+  await check(`car ${spec.id}`, async () => {
+    const { object, size } = await loadCar(spec);
+    const box = new THREE.Box3().setFromObject(object);
+    if (Math.abs(size.z - spec.length) > 0.05) {
+      throw new Error(`length ${size.z.toFixed(2)} m, expected ${spec.length}`);
+    }
+    if (Math.abs(box.min.y) > 0.02) throw new Error(`sits at y=${box.min.y.toFixed(3)}, not 0`);
+    if (size.y > 3.2 || size.y < 0.8) throw new Error(`height ${size.y.toFixed(2)} m looks wrong`);
+    if (size.x > 3.0) throw new Error(`width ${size.x.toFixed(2)} m looks wrong`);
+    return `${size.x.toFixed(2)} w x ${size.y.toFixed(2)} h x ${size.z.toFixed(2)} l m`;
+  });
+}
+
+// Drive a lap of geometry through the track helpers and make sure nothing
+// produces a NaN, which would silently teleport a car out of the world.
+await check('track sampling over a full lap', () => {
+  const t = window.__track;
+  const q = new THREE.Quaternion();
+  const p = new THREE.Vector3();
+  let minY = Infinity, maxY = -Infinity, maxBank = 0;
+  for (let s = 0; s < t.lapLength; s += 3) {
+    const st = t.sample(s, {});
+    for (const n of [-6, 0, 6]) {
+      t.position(st, n, p);
+      if (!Number.isFinite(p.x + p.y + p.z)) throw new Error(`NaN position at s=${s}, n=${n}`);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      t.orient(st, 0.2, q);
+      if (!Number.isFinite(q.x + q.y + q.z + q.w)) throw new Error(`NaN orientation at s=${s}`);
+    }
+    maxBank = Math.max(maxBank, Math.abs(st.bank));
+  }
+  return `surface y ${minY.toFixed(2)} to ${maxY.toFixed(2)} m, max bank ` +
+         `${(maxBank * 180 / Math.PI).toFixed(1)} deg`;
+});
+
+log('ALL CHECKS', failures === 0, failures === 0 ? 'no failures' : `${failures} failed`);
+document.title = failures === 0 ? 'SMOKE-PASS' : `SMOKE-FAIL-${failures}`;
+</script>
+</body>
+</html>
