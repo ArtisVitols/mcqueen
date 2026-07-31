@@ -1,5 +1,5 @@
 {
-  "_comment": "yaw is the rotation in radians needed to make the model face +Z. Verified by software-rendering side and top views with tools/render_cars.py - every model faces +Z except Chick Hicks, which is modelled backwards. length is the real-world length in metres the model is scaled to at load; the raw models range from 5 units to 2005 units so scale is always derived from the bounding box.",
+  "_comment": "yaw is the rotation in radians needed to make the model face +Z. All seven models already face +Z. Verify with tools/diag_cars.mjs, which renders them textured from the front: these characters have eyes on the windscreen, so the front is unmistakable. An untextured silhouette is not enough - reading one wrong had Chick Hicks racing backwards. length is the real-world length in metres the model is scaled to at load; the raw models range from 5 units to 2005 units so scale is always derived from the bounding box.",
   "cars": [
     {
       "id": "lightning_mcqueen",
@@ -17,7 +17,7 @@
       "name": "Chick Hicks",
       "number": "86",
       "colour": "#3ba845",
-      "yaw": 3.141592653589793,
+      "yaw": 0,
       "length": 4.9,
       "pace": 1.0,
       "aggression": 1.0,

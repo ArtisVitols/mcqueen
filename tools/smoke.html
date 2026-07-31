@@ -46,28 +46,34 @@ await check('three.js loads', () => THREE.REVISION && `r${THREE.REVISION}`);
 const { loadCar, loadTrack, assetUrl } = await import('../src/models.js');
 const { Track } = await import('../src/track.js');
 
-await check('track-data.json', async () => {
-  const t = await Track.load(assetUrl('track-data.json'));
-  window.__track = t;
-  const widths = t.data.outW.map((o, i) => o + t.data.inW[i]);
-  return `${t.lapLength.toFixed(0)} m lap, ${t.count} stations, ` +
-         `width ${Math.min(...widths).toFixed(1)}-${Math.max(...widths).toFixed(1)} m`;
-});
+const trackList = (await (await fetch(assetUrl('tracks.json'))).json()).tracks;
+await check('tracks.json', () => `${trackList.length} circuits`);
 
-await check('track.glb', async () => {
-  const scene = await loadTrack();
-  let tris = 0, meshes = 0;
-  scene.traverse((o) => {
-    if (!o.isMesh) return;
-    meshes++;
-    const g = o.geometry;
-    tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+for (const spec of trackList) {
+  await check(`data ${spec.id}`, async () => {
+    const t = await Track.load(assetUrl(spec.data));
+    if (!window.__track) window.__track = t;
+    const widths = t.data.outW.map((o, i) => o + t.data.inW[i]);
+    return `${t.lapLength.toFixed(0)} m lap, ${t.count} stations, ` +
+           `width ${Math.min(...widths).toFixed(1)}-${Math.max(...widths).toFixed(1)} m, ` +
+           `scale x${t.modelScale}`;
   });
-  const box = new THREE.Box3().setFromObject(scene);
-  const s = new THREE.Vector3(); box.getSize(s);
-  return `${meshes} meshes, ${Math.round(tris).toLocaleString()} tris, ` +
-         `${s.x.toFixed(0)} x ${s.y.toFixed(0)} x ${s.z.toFixed(0)} m`;
-});
+  await check(`model ${spec.id}`, async () => {
+    const t = await Track.load(assetUrl(spec.data));
+    const scene = await loadTrack(spec.model, t.modelScale);
+    let tris = 0, meshes = 0;
+    scene.traverse((o) => {
+      if (!o.isMesh) return;
+      meshes++;
+      const g = o.geometry;
+      tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    });
+    const box = new THREE.Box3().setFromObject(scene);
+    const s = new THREE.Vector3(); box.getSize(s);
+    return `${meshes} meshes, ${Math.round(tris).toLocaleString()} tris, ` +
+           `${s.x.toFixed(0)} x ${s.y.toFixed(0)} x ${s.z.toFixed(0)} m`;
+  });
+}
 
 const manifest = await (await fetch(assetUrl('cars.json'))).json();
 await check('cars.json', () => `${manifest.cars.length} cars`);
@@ -75,7 +81,8 @@ await check('cars.json', () => `${manifest.cars.length} cars`);
 for (const spec of manifest.cars) {
   await check(`car ${spec.id}`, async () => {
     const { object, size } = await loadCar(spec);
-    const box = new THREE.Box3().setFromObject(object);
+    // precise: McQueen is skinned, and the cheap path measures his bind pose.
+    const box = new THREE.Box3().setFromObject(object, true);
     if (Math.abs(size.z - spec.length) > 0.05) {
       throw new Error(`length ${size.z.toFixed(2)} m, expected ${spec.length}`);
     }

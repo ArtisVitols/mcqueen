@@ -57,6 +57,14 @@ html, body {
   backdrop-filter: none;
 }
 #menu .logo, #menu .driving { text-align: left; }
+#build-tag {
+  position: absolute;
+  left: calc(6vw + var(--safe-l));
+  bottom: calc(6px + var(--safe-b));
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  opacity: 0.35;
+}
 
 .logo {
   margin: 0;
@@ -115,35 +123,49 @@ button.big.ghost {
 /* ---------------------------------------------------------------- options */
 
 .panel {
-  width: min(760px, 94vw);
-  max-height: 94vh;
+  width: min(880px, 96vw);
+  max-height: 96vh;
   overflow-y: auto;
-  padding: clamp(14px, 3vh, 26px);
+  padding: clamp(10px, 2.2vh, 22px);
   border-radius: 20px;
   background: rgba(18, 24, 38, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: column;
-  gap: 1.2vh;
+  gap: 0.8vh;
   align-items: center;
 }
-.panel h2 { margin: 0; font-size: clamp(20px, 4vh, 30px); letter-spacing: 0.06em; }
+.panel h2 { margin: 0; font-size: clamp(17px, 3.2vh, 26px); letter-spacing: 0.06em; }
+
+/* Cars + track on the left, the switches and BACK on the right. */
+.opt-cols {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: clamp(10px, 2vw, 22px);
+  width: 100%;
+  align-items: start;
+}
+.opt-col { display: flex; flex-direction: column; gap: 0.6vh; min-width: 0; }
+@media (max-aspect-ratio: 1/1) {
+  .opt-cols { grid-template-columns: 1fr; }
+}
 
 .row-label {
   align-self: flex-start;
-  font-size: clamp(10px, 1.9vh, 13px);
+  margin-top: 0.3vh;
+  font-size: clamp(9px, 1.7vh, 12px);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   opacity: 0.6;
 }
 
-.cards { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
+.cards { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; }
 .card {
-  flex: 1 1 130px;
+  flex: 1 1 118px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 7px;
+  padding: 5px 8px;
   border-radius: 12px;
   border: 2px solid transparent;
   background: rgba(255, 255, 255, 0.07);
@@ -165,7 +187,7 @@ button.big.ghost {
 }
 .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.card.track { flex: 1 1 170px; flex-direction: column; align-items: flex-start; gap: 2px; }
+.card.track { flex: 1 1 128px; flex-direction: column; align-items: flex-start; gap: 1px; }
 .tname { font-weight: 800; }
 .tblurb { font-size: 0.82em; opacity: 0.6; }
 #track-picker.busy { opacity: 0.45; pointer-events: none; }
@@ -173,13 +195,13 @@ button.big.ghost {
 .opt-grid {
   display: grid;
   /* Wide enough that Easy/Normal/Hard stays on one line. */
-  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
-  gap: 10px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
   width: 100%;
 }
 .pills { display: flex; gap: 6px; flex-wrap: wrap; }
 .pill {
-  padding: 7px 14px;
+  padding: 5px 11px;
   border-radius: 999px;
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.06);
@@ -189,7 +211,7 @@ button.big.ghost {
 }
 .pill.sel { border-color: #ffd66b; background: #ffd66b; color: #2a1c00; }
 
-#opt-volume { width: 100%; accent-color: var(--red); height: 26px; }
+#opt-volume { width: 100%; accent-color: var(--red); height: 22px; margin: 0; }
 
 /* results */
 .order { list-style: none; margin: 0; padding: 0; width: 100%; max-width: 420px; }

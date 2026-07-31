@@ -69,6 +69,7 @@ class Game {
     }
 
     setProgress(1, 'Ready!');
+    dom('build-tag').textContent = `build ${globalThis.__BUILD__ || 'dev'}`;
     this.buildMenu();
     dom('loading').classList.add('hidden');
     dom('menu').classList.remove('hidden');

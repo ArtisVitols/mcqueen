@@ -17,9 +17,16 @@ const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
 const ASSETS = new URL('../assets/', import.meta.url);
 
-/** Resolve an asset path against the module, not the page that loaded it. */
+/**
+ * Resolve an asset path against the module, not the page that loaded it, and
+ * stamp it with the build id so a model and its physics data can never come
+ * from different deploys.
+ */
 export function assetUrl(path) {
-  return new URL(path, ASSETS).href;
+  const url = new URL(path, ASSETS);
+  const build = globalThis.__BUILD__;
+  if (build && build !== 'dev') url.searchParams.set('v', build);
+  return url.href;
 }
 
 export function loadGLTF(url, onProgress) {
@@ -39,7 +46,11 @@ export async function loadCar(spec) {
   inner.rotation.y = spec.yaw;
   inner.updateMatrixWorld(true);
 
-  const box = new THREE.Box3().setFromObject(inner);
+  // `precise` matters: McQueen is a skinned mesh, and the cheap path measures
+  // the geometry's bind pose rather than where the skeleton actually puts the
+  // vertices. That left the player's car - and only the player's car - sitting
+  // a wheel's height above the road.
+  const box = new THREE.Box3().setFromObject(inner, true);
   const size = new THREE.Vector3();
   const centre = new THREE.Vector3();
   box.getSize(size);
