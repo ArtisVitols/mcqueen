@@ -265,8 +265,10 @@ button.big.ghost {
 .pad-right { right: calc(14px + var(--safe-r)); flex-direction: column-reverse; }
 
 .ctl {
-  width: clamp(60px, 15vh, 104px);
-  height: clamp(60px, 15vh, 104px);
+  /* Generous targets - these are for a five-year-old's thumbs, and the floor
+     matters most on a short landscape screen where vh is small. */
+  width: clamp(68px, 17vh, 108px);
+  height: clamp(68px, 17vh, 108px);
   border-radius: 26%;
   border: 3px solid rgba(255, 255, 255, 0.5);
   background: rgba(255, 255, 255, 0.16);
