@@ -132,11 +132,12 @@ class Game {
     sun.position.set(-320, 420, 260);
     sun.castShadow = q.shadows;
     if (q.shadows) {
-      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.mapSize.set(1024, 1024);
       sun.shadow.camera.near = 20;
       sun.shadow.camera.far = 320;
-      // Tight box around the player: 1024 texels over the old 140 m spread
-      // barely registered a car. 44 m gives ~2 cm texels.
+      // Tight box around the player: the old 140 m spread left a car a few
+      // texels wide. 44 m over 1024 is ~4 cm per texel, which is plenty, and
+      // going to 2048 measurably slowed the heaviest circuit for no gain.
       const r = 22;
       Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r });
       sun.shadow.bias = -0.0006;
@@ -485,7 +486,8 @@ class Game {
       object: this.models.get(spec.id).object,
     }));
 
-    const race = new Race(this.track, entries, this.settings).build(this.settings.car);
+    const race = new Race(this.track, entries, this.settings,
+      this.trackSpec().gridLanes).build(this.settings.car);
     this.race = race;
     this.hud.setLaps(this.settings.laps);
     this.hud.setField(race.field.length);
@@ -524,14 +526,14 @@ class Game {
     this.camN += (car.n - this.camN) * blend;
 
     const camSt = track.sample(car.s - back, this._camSt);
-    const up = track.normal(camSt, this._up);
+    const up = track.normal(camSt, this._up, this.camN);
     track.position(camSt, this.camN, this.camPos).addScaledVector(up, height);
 
     // Aim just past the car so it sits in the lower third of the screen with
     // the road ahead filling the rest.
     const aimSt = track.sample(car.s + 7, this._aimSt);
     track.position(aimSt, this.camN, this.camAim)
-      .addScaledVector(track.normal(aimSt, this._w), 1.0);
+      .addScaledVector(track.normal(aimSt, this._w, this.camN), 1.0);
 
     this.camera.position.copy(this.camPos);
     this.camera.up.copy(up);

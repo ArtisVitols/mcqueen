@@ -11,7 +11,11 @@ import { DIFFICULTY } from './settings.js';
 const FIXED_DT = 1 / 120;
 const MAX_STEPS = 8;
 const GRID_ROW_GAP = 9;      // metres between rows
-const GRID_LANE = 3.2;       // lateral offset of the two grid columns
+// Lateral offset of the two grid columns. Overridden per circuit, because the
+// racing surface is not always centred on the racing line: at Motor Speedway
+// the start straight has a wide apron on the outside, and a symmetric grid put
+// half the field on it, outside the white line.
+const GRID_LANE = 3.2;
 const COUNTDOWN_STEP = 0.9;  // seconds between red lights
 
 export const State = {
@@ -21,8 +25,9 @@ export const State = {
 };
 
 export class Race {
-  constructor(track, cars, settings) {
+  constructor(track, cars, settings, gridLanes = null) {
     this.track = track;
+    this.gridLanes = gridLanes;
     this.cars = cars;                       // [{spec, object}]
     this.settings = settings;
     this.tuning = DIFFICULTY[settings.difficulty] || DIFFICULTY.easy;
@@ -58,9 +63,9 @@ export class Race {
       car.topSpeed = 78 * (car.isPlayer ? this.tuning.playerSpeed : this.tuning.aiSpeed);
 
       const row = Math.floor(i / 2);
-      const col = i % 2 ? 1 : -1;
+      const lanes = this.gridLanes || [-GRID_LANE, GRID_LANE];
       // Row 0 sits just behind the line; the pack stretches back from there.
-      car.placeOnGrid(12 + row * GRID_ROW_GAP, col * GRID_LANE);
+      car.placeOnGrid(12 + row * GRID_ROW_GAP, lanes[i % 2]);
       car.gridIndex = i;
 
       this.field.push(car);

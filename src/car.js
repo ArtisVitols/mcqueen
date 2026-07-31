@@ -133,7 +133,7 @@ export class Car {
   sync(st = this.track.sample(this.s, this.st)) {
     this.track.position(st, this.n, this.position);
     this.model.position.copy(this.position);
-    this.track.orient(st, this.psi, this._q);
+    this.track.orient(st, this.psi, this._q, this.n);
     this.model.quaternion.copy(this._q);
   }
 

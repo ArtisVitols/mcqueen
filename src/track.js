@@ -32,6 +32,16 @@ export class Track {
       this.kappa[i] = Math.hypot(bx - ax, bz - az) / base - 1;
     }
 
+    // Optional measured cross-section: heights relative to the centreline at
+    // a handful of lateral offsets. A single cross-slope cannot describe a
+    // banked road on a low-poly mesh - the surface curves between facets - and
+    // trying to force one is what left cars hovering at the edges of the road.
+    // Tracks without a profile fall back to the flat `bank` model.
+    this.profOffsets = data.profOffsets || null;
+    this.profile = data.profile ? Float32Array.from(data.profile) : null;
+    this.profN = this.profOffsets ? this.profOffsets.length : 0;
+    this._prof = new Float64Array(Math.max(1, this.profN));
+
     this._a = new THREE.Vector3();
     this._b = new THREE.Vector3();
     this._c = new THREE.Vector3();
@@ -81,6 +91,19 @@ export class Track {
     out.inW = d.inW[i] * u + d.inW[j] * t;
     out.bank = d.bank[i] * u + d.bank[j] * t;
     out.kappa = this.kappa[i] * u + this.kappa[j] * t;
+    if (this.profile) {
+      const P = this.profN;
+      const pi = i * P, pj = j * P;
+      for (let k = 0; k < P; k++) {
+        this._prof[k] = this.profile[pi + k] * u + this.profile[pj + k] * t;
+      }
+      out.prof = this._prof;
+    } else {
+      // Must be cleared, not left alone: station objects are reused across
+      // tracks, so a profile left over from the previous circuit would send
+      // rise() down the profile path with no offsets to read.
+      out.prof = null;
+    }
     return out;
   }
 
@@ -91,22 +114,48 @@ export class Track {
 
   /** How far sideways a car may go before it is off the racing surface. */
   limit(st, n) {
-    // Half a car width of margin so models never hang over the edge.
-    return n > 0 ? st.outW - 1.2 : -(st.inW - 1.2);
+    // The clamp constrains the car's centre, so the margin has to cover half
+    // its width or the bodywork hangs over the edge and clips the wall. The
+    // widest car here is Mater at 2.46 m.
+    return n > 0 ? st.outW - EDGE_MARGIN : -(st.inW - EDGE_MARGIN);
+  }
+
+  /** Height of the surface above the centreline point, at lateral offset n. */
+  rise(st, n) {
+    if (!st.prof) return Math.tan(st.bank) * n;
+    const off = this.profOffsets;
+    const P = this.profN;
+    let k = 0;
+    while (k < P - 2 && n > off[k + 1]) k++;
+    const span = off[k + 1] - off[k];
+    const t = span > 1e-9 ? (n - off[k]) / span : 0;   // extrapolates past the ends
+    return st.prof[k] + (st.prof[k + 1] - st.prof[k]) * t;
+  }
+
+  /** Cross-slope of the surface at lateral offset n, as dy/dn. */
+  slope(st, n) {
+    if (!st.prof) return Math.tan(st.bank);
+    const off = this.profOffsets;
+    const P = this.profN;
+    let k = 0;
+    while (k < P - 2 && n > off[k + 1]) k++;
+    const span = off[k + 1] - off[k];
+    return span > 1e-9 ? (st.prof[k + 1] - st.prof[k]) / span : 0;
   }
 
   /** World position of the track surface at (s, n). */
   position(st, n, out = new THREE.Vector3()) {
     return out.set(
       st.x + st.ox * n,
-      st.y + Math.tan(st.bank) * n,
+      st.y + this.rise(st, n),
       st.z + st.oz * n,
     );
   }
 
   /** Surface normal at (s, n) - cars sit and lean on this. */
-  normal(st, out = new THREE.Vector3()) {
-    const cb = Math.cos(st.bank), sb = Math.sin(st.bank);
+  normal(st, out = new THREE.Vector3(), n = 0) {
+    const a = Math.atan(this.slope(st, n));
+    const cb = Math.cos(a), sb = Math.sin(a);
     // Cross-slope direction lying in the surface, pointing outwards.
     this._a.set(st.ox * cb, sb, st.oz * cb);
     this._b.set(st.tx, 0, st.tz);
@@ -122,8 +171,8 @@ export class Track {
    * Orientation for a car at st heading `psi` radians off the tangent,
    * banked with the track. Writes into `quat`.
    */
-  orient(st, psi, quat) {
-    const up = this.normal(st, this._c);
+  orient(st, psi, quat, n = 0) {
+    const up = this.normal(st, this._c, n);
     const cos = Math.cos(psi), sin = Math.sin(psi);
     // Tangent rotated by psi about the vertical, then made perpendicular to up.
     const fx = st.tx * cos + st.ox * sin;
@@ -139,3 +188,6 @@ export class Track {
 }
 
 const _m = new THREE.Matrix4();
+
+// Half the widest car, plus a little clearance.
+const EDGE_MARGIN = 1.6;

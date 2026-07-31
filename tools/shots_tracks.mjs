@@ -28,6 +28,8 @@ await sleep(1200);
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: true,
+  // SwiftShader takes over a minute a frame budget on the heaviest circuit.
+  protocolTimeout: 900000,
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader',
          '--enable-unsafe-swiftshader', '--hide-scrollbars',
          '--autoplay-policy=no-user-gesture-required',
@@ -59,8 +61,11 @@ for (const spec of tracks) {
   await page.screenshot({ path: join(OUT, `track_${spec.id}_menu.png`) });
 
   await page.click('#btn-start');
+  // Yoyleland is 464k triangles and SwiftShader manages under 2 fps on it, so
+  // the 5.4 s countdown can take a minute of wall clock. Nothing to do with
+  // the game - a phone GPU renders it at 60.
   await page.waitForFunction("window.game.race && window.game.race.state === 'racing'",
-    { timeout: 180000 });
+    { timeout: 420000 });
   await page.evaluate(() => { window.game.input.state.gas = true; });
   await sleep(14000);
   const st = await page.evaluate(() => {

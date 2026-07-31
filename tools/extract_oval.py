@@ -29,6 +29,7 @@ BUILD = os.path.join(ROOT, 'build')
 
 RAYS = 1440
 HARMONICS = 12
+SHAPE_HARMONICS = 48   # low-pass for the centreline itself, after snapping
 STATIONS = 1200
 TARGET_WIDTH = 18.0     # metres; every circuit is scaled to race like a superspeedway
 
@@ -289,6 +290,15 @@ def main():
     # gently, re-space, repeat. This locks the line to the road rather than to
     # an idealised oval.
     centre_px, lap_px = snap_to_mask(centre_px, mask, cx, cy)
+
+    # Snapping works on a pixel grid, so the line comes out as a staircase -
+    # one pixel is over a metre once a 1:23 model is scaled up, which reads as
+    # the car twitching left and right several degrees per station. Low-pass
+    # the closed curve: 48 harmonics keeps every feature down to ~30 m and
+    # discards the pixel noise entirely.
+    xs = fourier_smooth([p[0] for p in centre_px], SHAPE_HARMONICS)
+    zs = fourier_smooth([p[1] for p in centre_px], SHAPE_HARMONICS)
+    centre_px, lap_px = resample(list(zip(xs, zs)), STATIONS)
 
     band = sorted(outer[i] - inner[i] for i in range(RAYS))
     model_width = band[RAYS // 2] * mpp

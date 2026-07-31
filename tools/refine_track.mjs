@@ -98,14 +98,18 @@ for (const spec of todo) {
     // Beyond this the real cross-section curves away from any single plane,
     // so the racing surface is trimmed to where the model is honest.
     const MAX_HALF = 6.5;
-    const MIN_HALF = 2.6;      // narrow enough to pinch at a pit entry, wide enough to race
-    const PLANE_TOL = 0.30;    // metres the mesh may stray from the fitted plane
+    // The corridor still has to hold a race: Track.limit() takes 1.6 m off
+    // each side for the car's own width, so anything under about 4 m here
+    // leaves less than two car widths and the field grinds against the clamp.
+
+    // Lateral sample points, as fractions of the usable half-width.
+    const PROF_FRACTIONS = [-1, -0.5, 0, 0.5, 1];
     const N = track.count;
     // Widths stay as extract_oval.py measured them off the road mask: walking
     // outwards by raycast happily wanders onto the apron, which then lets the
     // AI put a wheel somewhere that is not road.
     const out = { y: new Array(N), bank: new Array(N),
-                  outW: new Array(N), inW: new Array(N) };
+                  outW: new Array(N), inW: new Array(N), profile: [] };
     let expect = ys[0];
     let misses = 0;
 
@@ -114,66 +118,78 @@ for (const spec of todo) {
       const yc = surfaceAt(st, 0, expect);
       if (yc === null) { misses++; out.y[i] = expect; } else { out.y[i] = yc; expect = yc; }
 
-      // Least-squares plane fit across the lanes cars actually use. Two
-      // probes either side of the centreline would nail the middle and let
-      // the error pile up at the edges, which is where the AI runs; fitting
-      // over the whole width spreads it instead. Iterated, because each probe
-      // has to look for the road at the height the current fit predicts.
+      // Measure the cross-section rather than fitting a plane to it. These
+      // roads are banked and low-poly, so the surface curves between facets;
+      // forcing one slope through it left cars hovering at the edges however
+      // the fit was weighted, and trimming the road back to where a plane did
+      // fit just made the circuit too narrow to race on.
       const half = Math.min(MAX_HALF, Math.min(data0.outW[i], data0.inW[i]));
-      const arms = [-half, -half / 2, half / 2, half];
-      let slope = Math.tan(data0.bank[i] || 0);
-      let base = out.y[i];
-      for (let pass = 0; pass < 3; pass++) {
-        const pts = [[0, out.y[i]]];
-        for (const a of arms) {
-          const h = surfaceAt(st, a, base + slope * a);
-          if (h !== null && Math.abs(h - (base + slope * a)) < 1.5) pts.push([a, h]);
-        }
-        if (pts.length < 3) break;
-        const n0 = pts.length;
-        const sx = pts.reduce((t, q) => t + q[0], 0);
-        const sy = pts.reduce((t, q) => t + q[1], 0);
-        const sxx = pts.reduce((t, q) => t + q[0] * q[0], 0);
-        const sxy = pts.reduce((t, q) => t + q[0] * q[1], 0);
-        const den = n0 * sxx - sx * sx;
-        if (Math.abs(den) < 1e-9) break;
-        const b = (n0 * sxy - sx * sy) / den;
-        if (Math.abs(b) > 0.6) break;         // >31 deg is not a racing surface
-        slope = b;
-        base = (sy - b * sx) / n0;
+      const offs = PROF_FRACTIONS.map((f) => f * half);
+      const rel = [];
+      let prev = 0;
+      for (const a of offs) {
+        const h = surfaceAt(st, a, out.y[i] + prev);
+        const r = h === null ? prev : h - out.y[i];
+        rel.push(r);
+        prev = r;
       }
-      out.y[i] = base;
-      out.bank[i] = Math.atan(slope);
-
-      // Width is defined as the span over which the fitted plane actually
-      // matches the mesh. Anywhere the real cross-section curves away - pit
-      // entries, apron transitions - the racing surface simply narrows, which
-      // is honest and keeps cars from floating over the gap.
-      const reach = (sign) => {
-        let last = MIN_HALF;
-        for (let d = MIN_HALF; d <= MAX_HALF; d += 0.25) {
-          const want = base + slope * sign * d;
-          const h = surfaceAt(st, sign * d, want);
-          if (h === null || Math.abs(h - want) > PLANE_TOL) break;
-          last = d;
-        }
-        return last;
-      };
-      out.outW[i] = Math.min(data0.outW[i], reach(1));
-      out.inW[i] = Math.min(data0.inW[i], reach(-1));
+      out.profile.push({ offs, rel });
+      out.outW[i] = Math.min(data0.outW[i], MAX_HALF);
+      out.inW[i] = Math.min(data0.inW[i], MAX_HALF);
 
     }
 
-    // Light periodic smoothing so nothing jitters under the camera.
-    const smooth = (arr, half) => arr.map((_, i) => {
-      let sum = 0;
-      for (let k = -half; k <= half; k++) sum += arr[(i + k + arr.length) % arr.length];
-      return sum / (2 * half + 1);
+    // These circuits are modelled low-poly and then scaled up 15-23x, so
+    // raycasting them returns a faceted surface: kinks a centimetre high in
+    // the model become knee-high steps in the game, and at 50 m/s that is
+    // 20 g of vertical jitter - the car visibly shakes. Along-lap elevation
+    // change is tiny on every circuit here (well under 2 m a lap), so the
+    // high frequencies are all noise and can go. Three passes approximate a
+    // Gaussian; curvature falls with the square of the window.
+    const smooth = (arr, half, passes = 1) => {
+      let a = arr;
+      for (let p = 0; p < passes; p++) {
+        const b = a.map((_, i) => {
+          let sum = 0;
+          for (let k = -half; k <= half; k++) sum += a[(i + k + a.length) % a.length];
+          return sum / (2 * half + 1);
+        });
+        a = b;
+      }
+      return a;
+    };
+    out.y = smooth(out.y, 6, 3);
+    // Smooth each lateral sample along the lap, then rebuild the profile on a
+    // fixed set of offsets so the game can interpolate it cheaply.
+    const P = PROF_FRACTIONS.length;
+    const halfMax = Math.max(...out.outW, ...out.inW);
+    const profOffsets = PROF_FRACTIONS.map((f) => +(f * halfMax).toFixed(3));
+    const cols = [];
+    for (let k = 0; k < P; k++) {
+      // Resample each station's measured pair onto the common offsets.
+      const col = out.profile.map((pr, i) => {
+        const want = profOffsets[k];
+        const o = pr.offs;
+        let a = 0;
+        while (a < P - 2 && want > o[a + 1]) a++;
+        const span = o[a + 1] - o[a];
+        const t = span > 1e-9 ? (want - o[a]) / span : 0;
+        return pr.rel[a] + (pr.rel[a + 1] - pr.rel[a]) * t;
+      });
+      cols.push(smooth(col, 6, 3));
+    }
+    const flat = [];
+    for (let i = 0; i < N; i++) for (let k = 0; k < P; k++) flat.push(+cols[k][i].toFixed(4));
+    out.profOffsets = profOffsets;
+    out.flatProfile = flat;
+    // Keep `bank` as the mid-road cross-slope, for anything still using it.
+    out.bank = out.profile.map((_, i) => {
+      const lo = cols[1][i], hi = cols[3][i];
+      const span = profOffsets[3] - profOffsets[1];
+      return span > 1e-9 ? Math.atan((hi - lo) / span) : 0;
     });
-    out.y = smooth(out.y, 1);
-    out.bank = smooth(out.bank, 5);
-    out.outW = smooth(out.outW, 6);
-    out.inW = smooth(out.inW, 6);
+    out.outW = smooth(out.outW, 8, 2);
+    out.inW = smooth(out.inW, 8, 2);
 
     const deg = out.bank.map((b) => b * 180 / Math.PI);
     return {
@@ -181,6 +197,7 @@ for (const spec of todo) {
       y: out.y.map((v) => +v.toFixed(3)),
       bank: out.bank.map((v) => +v.toFixed(5)),
       outW: out.outW, inW: out.inW,
+      profOffsets: out.profOffsets, profile: out.flatProfile,
       summary: {
         yMin: Math.min(...out.y), yMax: Math.max(...out.y),
         bankMin: Math.min(...deg), bankMax: Math.max(...deg),
@@ -195,6 +212,8 @@ for (const spec of todo) {
   data.bank = result.bank;
   data.outW = result.outW;
   data.inW = result.inW;
+  data.profOffsets = result.profOffsets;
+  data.profile = result.profile;
   writeFileSync(file, JSON.stringify(data));
 
   const s = result.summary;

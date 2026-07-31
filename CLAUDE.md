@@ -34,8 +34,10 @@ realistic when they conflict.
   `~/.local/chrome/chrome-headless-shell-linux64/chrome-headless-shell` and
   renders through SwiftShader. Every browser-based tool uses it via
   puppeteer-core.
-- SwiftShader runs at single-digit fps. Waits in the test scripts are generous
-  on purpose; don't tighten them.
+- SwiftShader runs at single-digit fps - about 1.7 on Yoyleland's 464k
+  triangles, so its 5.4 s countdown takes a minute of wall clock. Waits in the
+  test scripts are generous on purpose and every puppeteer launch needs
+  `protocolTimeout` raised; don't tighten either.
 - `tools/browser.py` drives Firefox via geckodriver for non-WebGL pages
   (the smoke test). Fine for DOM work, useless for rendering.
 - **Never `pkill -f "http.server 8099"`.** The pattern matches the shell's own
@@ -170,6 +172,32 @@ entry is correct; a car floating over the gap is not.
   it wanders metres off a 12 m road. `extract_oval.py` snaps the line onto the
   road mask afterwards, sliding each station to the middle of the strip it
   sits in. Do not remove that pass.
+- **A road is not a plane.** These circuits are low-poly and scaled up 15-23x,
+  so the surface curves between facets and no single cross-slope fits it. The
+  data carries a measured cross-section (`profOffsets` + `profile`, five
+  heights across the road) and `Track.rise`/`slope` interpolate it. Forcing a
+  plane instead cost 11 cm of typical height error and forced the road to be
+  trimmed so narrow the field could not fit; the profile brought it to 3 mm at
+  full width. Yoyleland has no profile and falls back to `bank` - which is why
+  `sample()` must *clear* `out.prof` when a track has none. Station objects are
+  reused across circuits, and a leftover profile crashed the game loop when
+  switching from a profiled track to Yoyleland.
+- **Raycast samples of a faceted mesh need heavy smoothing.** Unfiltered they
+  gave Palm Mile 20 g of vertical jitter and 6 degrees per station of yaw
+  wobble - the car visibly shook. `refine_track.mjs` smooths heights and the
+  profile with three passes of a wide window, and `extract_oval.py` low-passes
+  the snapped centreline, because snapping quantises it to the pixel grid and
+  one pixel is over a metre once scaled. Check with the numbers in
+  "Verifying", not by eye.
+- **`refine_track.mjs` is not idempotent.** It reads the file it writes, so
+  running it twice compounds the width trimming. Always run `extract_oval.py`
+  first.
+- **The grid is laid out in track space**, so it lands wherever the racing
+  line's lateral offsets put it. At Motor Speedway the start straight has a
+  wide apron outside the white line and a symmetric grid put half the field on
+  it. `gridLanes` in `tracks.json` overrides the two columns per circuit.
+  `Track.limit` also reserves a full half-car-width (1.6 m), or the bodywork
+  hangs over the edge even though the car's centre is legal.
 - **Untextured renders are not enough to judge which way a car faces.** Reading
   a grey silhouette wrong had Chick Hicks racing backwards for a release. These
   characters have eyes on the windscreen — render textured and look.
@@ -189,6 +217,7 @@ node tools/shots_tracks.mjs        # ... on each circuit
 node tools/check_ride_height.mjs   # gap between each car and the road
 node tools/diag_cars.mjs <track>   # car facing + wheels on a reference plane
 node tools/lap_tour.mjs <track>    # chase cam all the way round a lap
+node tools/check_grid.mjs          # what surface each starting slot sits on
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout
 python3 tools/overlay_line.py <t>  # racing line drawn on the overhead render
@@ -203,9 +232,11 @@ What "good" looks like right now:
 - `simulate.mjs all` — 9 OK. Easy is P1 on every circuit, Hard beats a
   throttle-pinned player on every circuit. If Easy stops being a win, that is a
   regression regardless of what else improved.
-- `verify_track.mjs` — median height error 27 mm / 99 mm / 36 mm, and under
+- `verify_track.mjs` — median height error 3 mm / 3 mm / 34 mm, and under
   0.2% of points past 0.5 m on all three. The **median** is the signal that
   catches systemic drift.
+- Ride quality: vertical jitter under ~0.5 g at 50 m/s and yaw wobble under
+  0.1 deg per station. Above about 1 g the car visibly shakes.
 - A session downloads ~3.5 MB and reaches the menu in about 5 s, because only
   the selected circuit loads. `assets/` totals ~9 MB across all three; the
   420k-triangle Yoyleland model is 5.9 MB of that and only arrives if picked.
