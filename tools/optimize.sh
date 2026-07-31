@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # Compress the raw Sketchfab models down to something a phone can download.
 #
-# The speedway is 38 MB / 755k triangles as shipped. Welding + simplifying +
-# meshopt gets it to ~5 MB / 420k triangles while moving the track deck by less
-# than 5 mm at p95, which matters because assets/track-data.json was measured
-# off the original mesh and the cars sit on those heights.
+# IMPORTANT: the speedway must be baked into world space before anything
+# quantises it. Sketchfab stored its geometry in a local space spanning about
+# +/-3,000,000 units, scaled down to ~660 m by the node hierarchy. Point a
+# quantising compressor at that and it lays a 14-bit grid over millions of
+# units: the banked asphalt collapses onto the flat apron, the infield grass
+# ends up on top of the racing surface, and the cars float a metre in the air.
+# tools/bake_transforms.py bakes the transforms so local coordinates are
+# metres, after which quantisation behaves and 16-bit positions hold the deck
+# to about a centimetre.
+#
+# Verify with tools/verify_track.mjs after any change here - it raycasts the
+# shipped asset and checks the surface still matches assets/track-data.json.
 #
 # Cars are only a few thousand triangles each and are seen up close, so they
 # are compressed but never simplified. McQueen is a skinned mesh; simplifying
@@ -19,10 +27,13 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p assets/cars
 
 echo "=== speedway ==="
-$GT weld raw/speedway.glb "$TMP/w.glb" > /dev/null
-$GT simplify "$TMP/w.glb" "$TMP/s.glb" --ratio 0.4 --error 0.005 > /dev/null
+python3 tools/bake_transforms.py raw/speedway.glb "$TMP/baked.glb"
+$GT weld "$TMP/baked.glb" "$TMP/w.glb" > /dev/null
+# error is a fraction of the mesh radius (~800 m here), so 0.00007 is ~5 cm -
+# enough to thin the scenery without moving the track deck.
+$GT simplify "$TMP/w.glb" "$TMP/s.glb" --ratio 0.35 --error 0.00007 > /dev/null
 $GT webp "$TMP/s.glb" "$TMP/sw.glb" > /dev/null
-$GT meshopt "$TMP/sw.glb" assets/track.glb > /dev/null
+$GT meshopt "$TMP/sw.glb" assets/track.glb --quantize-position 16 > /dev/null
 printf '  %-22s %s\n' "track" "$(du -h assets/track.glb | cut -f1)"
 
 # Cars are nearly all texture weight - 1024px maps on a car that is a few

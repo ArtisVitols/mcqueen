@@ -36,6 +36,17 @@ centreline, and metres sideways from it. That one decision buys a lot:
   `1 + n·κ` is baked into the integration - so the low line pays, like it does
   in real NASCAR.
 
+One trap worth knowing about if you touch the asset pipeline: Sketchfab stored
+the speedway in a local space spanning about ±3,000,000 units, scaled down to
+~660 m by the node hierarchy. Any quantising compressor lays its grid over
+those millions of units and wrecks the model — meshopt at its default 14 bits
+collapsed the banked asphalt onto the flat apron, put the infield grass on top
+of the racing line, and left every car floating a metre above the road while
+the physics carried on regardless. `tools/bake_transforms.py` bakes the
+transforms into the vertices first so local coordinates are metres, and
+`tools/verify_track.mjs` raycasts the *shipped* asset afterwards to prove the
+rendered surface still matches the physics. Run it after any pipeline change.
+
 Everything else is a static site: vanilla ES modules, three.js vendored into
 `vendor/`, no build step, no runtime dependencies.
 
@@ -66,10 +77,12 @@ python3 -m http.server 8000        # then open http://localhost:8000
 
 bash  tools/fetch_assets.sh        # re-download the source models into raw/
 python3 tools/extract_track.py     # rebuild assets/track-data.json (+ validates)
-bash  tools/optimize.sh            # recompress models into assets/
+bash  tools/optimize.sh            # bake + recompress models into assets/
 python3 tools/render_cars.py       # contact sheets to check model orientation
 
 node  tools/simulate.mjs all       # headless race: laps, limits, difficulty
+node  tools/verify_track.mjs       # shipped track vs physics data - run this!
+node  tools/check_ride_height.mjs  # gap between each car and the road
 node  tools/shots.mjs              # drive the real game in headless Chrome
 ```
 
