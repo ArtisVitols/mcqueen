@@ -71,9 +71,10 @@ export async function loadCar(spec) {
   };
 }
 
-export async function loadTrack(onProgress) {
-  const gltf = await loadGLTF(assetUrl('track.glb'), onProgress);
+export async function loadTrack(file, scale = 1, onProgress) {
+  const gltf = await loadGLTF(assetUrl(file), onProgress);
   const scene = gltf.scene;
+  scene.scale.setScalar(scale);
   scene.traverse((o) => {
     if (!o.isMesh) return;
     o.castShadow = false;
@@ -83,9 +84,29 @@ export async function loadTrack(onProgress) {
       // without an environment map.
       if (m.metalness !== undefined) m.metalness = Math.min(m.metalness, 0.3);
       if (m.roughness !== undefined) m.roughness = Math.max(m.roughness, 0.5);
+      // One circuit hides an alpha-0 collision shell above the road. Leaving
+      // it visible makes the track look fogged from inside.
+      if (m.transparent && m.opacity === 0) o.visible = false;
     }
   });
+  scene.updateMatrixWorld(true);
   return scene;
+}
+
+/** Free a track's GPU memory before swapping in another one. */
+export function disposeTrack(scene) {
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry?.dispose();
+    for (const m of materialsOf(o)) {
+      if (!m) continue;
+      for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap',
+                         'emissiveMap', 'aoMap', 'alphaMap']) {
+        m[key]?.dispose?.();
+      }
+      m.dispose();
+    }
+  });
 }
 
 function materialsOf(mesh) {

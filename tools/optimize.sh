@@ -26,15 +26,22 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p assets/cars
 
-echo "=== speedway ==="
-python3 tools/bake_transforms.py raw/speedway.glb "$TMP/baked.glb"
-$GT weld "$TMP/baked.glb" "$TMP/w.glb" > /dev/null
-# error is a fraction of the mesh radius (~800 m here), so 0.00007 is ~5 cm -
-# enough to thin the scenery without moving the track deck.
-$GT simplify "$TMP/w.glb" "$TMP/s.glb" --ratio 0.35 --error 0.00007 > /dev/null
-$GT webp "$TMP/s.glb" "$TMP/sw.glb" > /dev/null
-$GT meshopt "$TMP/sw.glb" assets/track.glb --quantize-position 16 > /dev/null
-printf '  %-22s %s\n' "track" "$(du -h assets/track.glb | cut -f1)"
+# track <source> <output> <simplify-ratio> <simplify-error>
+# The error is a fraction of the mesh radius, so it has to be scaled to the
+# model: Yoyleland is ~800 m across, the other two are modelled at about 1:15.
+track() {
+  python3 tools/bake_transforms.py "raw/$1.glb" "$TMP/baked.glb" | sed 's/^/  /'
+  $GT weld "$TMP/baked.glb" "$TMP/w.glb" > /dev/null
+  $GT simplify "$TMP/w.glb" "$TMP/s.glb" --ratio "$3" --error "$4" > /dev/null
+  $GT webp "$TMP/s.glb" "$TMP/sw.glb" > /dev/null
+  $GT meshopt "$TMP/sw.glb" "assets/$2" --quantize-position 16 > /dev/null
+  printf '  %-22s %s\n' "$2" "$(du -h "assets/$2" | cut -f1)"
+}
+
+echo "=== tracks ==="
+track speedway                    track.glb        0.35 0.00007
+track motor_speedway_of_the_south track-msots.glb  0.60 0.00006
+track palm_mile_speedway          track-palm.glb   0.60 0.00006
 
 # Cars are nearly all texture weight - 1024px maps on a car that is a few
 # hundred pixels tall on a phone. 512 + WebP is visually identical here.

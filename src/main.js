@@ -4,7 +4,7 @@ import { Race, State } from './race.js';
 import { Input } from './input.js';
 import { Hud } from './hud.js';
 import { Audio } from './audio.js';
-import { loadCar, loadTrack, assetUrl } from './models.js';
+import { loadCar, loadTrack, disposeTrack, assetUrl } from './models.js';
 import * as Settings from './settings.js';
 import { QUALITY, DIFFICULTY, LAP_CHOICES } from './settings.js';
 
@@ -44,27 +44,28 @@ class Game {
       if (text) status.textContent = text;
     };
 
-    setProgress(0.05, 'Reading the track…');
-    const [track, manifest] = await Promise.all([
-      Track.load(assetUrl('track-data.json')),
+    setProgress(0.05, 'Reading the calendar…');
+    const [cars, tracks] = await Promise.all([
       fetch(assetUrl('cars.json')).then((r) => r.json()),
+      fetch(assetUrl('tracks.json')).then((r) => r.json()),
     ]);
-    this.track = track;
-    this.carSpecs = manifest.cars;
+    this.carSpecs = cars.cars;
+    this.trackSpecs = tracks.tracks;
+    if (!this.trackSpecs.some((t) => t.id === this.settings.track)) {
+      this.settings.track = this.trackSpecs[0].id;
+    }
 
-    setProgress(0.15, 'Building the speedway…');
-    this.trackScene = await loadTrack((e) => {
-      if (e.lengthComputable) setProgress(0.15 + 0.55 * (e.loaded / e.total));
-    });
-    this.scene.add(this.trackScene);
+    const spec = this.trackSpec();
+    setProgress(0.15, `Building ${spec.short}…`);
+    await this.loadTrackById(this.settings.track, (f) => setProgress(0.15 + 0.55 * f));
 
     for (let i = 0; i < this.carSpecs.length; i++) {
-      const spec = this.carSpecs[i];
-      setProgress(0.7 + 0.3 * (i / this.carSpecs.length), `Waking up ${spec.name}…`);
-      const model = await loadCar(spec);
+      const car = this.carSpecs[i];
+      setProgress(0.7 + 0.3 * (i / this.carSpecs.length), `Waking up ${car.name}…`);
+      const model = await loadCar(car);
       model.object.visible = false;
       this.scene.add(model.object);
-      this.models.set(spec.id, model);
+      this.models.set(car.id, model);
     }
 
     setProgress(1, 'Ready!');
@@ -74,6 +75,33 @@ class Game {
     this.startIdleCamera();
     addEventListener('resize', () => this.resize());
     this.watchOrientation();
+  }
+
+  trackSpec(id = this.settings.track) {
+    return this.trackSpecs.find((t) => t.id === id) || this.trackSpecs[0];
+  }
+
+  /**
+   * Swap in a circuit: its racing line and its model, which is scaled to match
+   * because two of the three are modelled at roughly 1:15. Only one track is
+   * ever resident - the big one is 420k triangles and a phone should not be
+   * holding three.
+   */
+  async loadTrackById(id, onProgress) {
+    const spec = this.trackSpec(id);
+    const track = await Track.load(assetUrl(spec.data));
+    const scene = await loadTrack(spec.model, track.modelScale, (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    });
+    if (this.trackScene) {
+      this.scene.remove(this.trackScene);
+      disposeTrack(this.trackScene);
+    }
+    this.track = track;
+    this.trackScene = scene;
+    this.scene.add(scene);
+    this.settings.track = spec.id;
+    return track;
   }
 
   initRenderer() {
@@ -153,6 +181,7 @@ class Game {
     dom('btn-again').onclick = () => this.startRace();
 
     this.buildCarPicker();
+    this.buildTrackPicker();
     this.buildToggles();
     this.setIdleCar(this.settings.car);
   }
@@ -183,6 +212,48 @@ class Game {
     }
     const spec = this.carSpecs.find((c) => c.id === this.settings.car);
     dom('menu-car').textContent = spec ? spec.name : '';
+    dom('menu-track').textContent = this.trackSpec().name;
+  }
+
+  buildTrackPicker() {
+    const wrap = dom('track-picker');
+    wrap.innerHTML = '';
+    for (const spec of this.trackSpecs) {
+      const b = document.createElement('button');
+      b.className = 'card track';
+      b.dataset.track = spec.id;
+      b.innerHTML = `<span class="tname">${spec.short}</span>
+                     <span class="tblurb">${spec.blurb}</span>`;
+      b.onclick = () => this.pickTrack(spec.id);
+      wrap.appendChild(b);
+    }
+    this.syncTrackPicker();
+  }
+
+  async pickTrack(id) {
+    if (id === this.settings.track || this.switchingTrack) return;
+    this.switchingTrack = true;
+    const wrap = dom('track-picker');
+    wrap.classList.add('busy');
+    try {
+      cancelAnimationFrame(this.raf);
+      await this.loadTrackById(id);
+      Settings.save(this.settings);
+      this.syncTrackPicker();
+      this.startIdleCamera();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      wrap.classList.remove('busy');
+      this.switchingTrack = false;
+    }
+  }
+
+  syncTrackPicker() {
+    for (const b of dom('track-picker').children) {
+      b.classList.toggle('sel', b.dataset.track === this.settings.track);
+    }
+    dom('menu-track').textContent = this.trackSpec().name;
   }
 
   buildToggles() {

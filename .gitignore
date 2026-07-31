@@ -9,3 +9,6 @@ node_modules/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Overhead render passes used by the track extractors
+build/

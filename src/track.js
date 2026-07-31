@@ -15,6 +15,9 @@ export class Track {
     this.lapLength = data.lapLength;
     this.count = data.stationCount;
     this.step = data.stationStep;
+    // Two of the circuits are modelled at roughly 1:15. The extractor already
+    // baked this into the racing line, so the visual model has to match.
+    this.modelScale = data.modelScale ?? 1;
 
     // How much longer a lap gets per metre of outward offset. An offset path
     // around a curve is longer on the outside and shorter on the inside, which

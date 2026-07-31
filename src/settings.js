@@ -2,6 +2,7 @@ const KEY = 'mcqueen-speedway';
 
 const DEFAULTS = {
   car: 'lightning_mcqueen',
+  track: 'msots',
   laps: 3,
   quality: 'high',
   difficulty: 'easy',

@@ -6,7 +6,8 @@
  * limits, whether overtakes actually happen and whether each difficulty is
  * winnable by a player who simply holds the throttle down.
  *
- *   node tools/simulate.mjs [difficulty] [laps]
+ *   node tools/simulate.mjs all            every track x every difficulty
+ *   node tools/simulate.mjs <track> <difficulty> [laps]
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -35,9 +36,12 @@ class FlatOut {
   }
 }
 
-export function simulate({ difficulty = 'easy', laps = 3, playerId = 'lightning_mcqueen',
-                           steerNoise = 0, verbose = false } = {}) {
-  const track = new Track(read('assets/track-data.json'));
+export const TRACKS = read('assets/tracks.json').tracks;
+
+export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3,
+                           playerId = 'lightning_mcqueen', steerNoise = 0 } = {}) {
+  const spec = TRACKS.find((t) => t.id === trackId) || TRACKS[0];
+  const track = new Track(read(`assets/${spec.data}`));
   const specs = read('assets/cars.json').cars;
 
   const entries = specs.map((spec) => ({ spec, object: new THREE.Object3D() }));
@@ -85,15 +89,15 @@ export function simulate({ difficulty = 'easy', laps = 3, playerId = 'lightning_
     prevOrder = order;
   }
 
-  return { race, track, stats, seconds: t, laps, difficulty, lapCrossings };
+  return { race, track, stats, seconds: t, laps, difficulty, lapCrossings, spec };
 }
 
 function report(run) {
-  const { race, stats, seconds, laps, difficulty, track } = run;
+  const { race, stats, seconds, laps, difficulty, track, spec } = run;
   const player = race.player;
   const lapTime = seconds / laps;
 
-  console.log(`\n=== ${difficulty.toUpperCase()}  ${laps} lap(s) ===`);
+  console.log(`\n=== ${spec.short} / ${difficulty.toUpperCase()}  ${laps} lap(s) ===`);
   console.log(`race time      ${seconds.toFixed(1)} s   (~${lapTime.toFixed(1)} s/lap)`);
   console.log(`lap length     ${track.lapLength.toFixed(0)} m`);
   console.log(`speeds         ${(stats.minSpeed * 3.6).toFixed(0)} - ${(stats.maxSpeed * 3.6).toFixed(0)} km/h`);
@@ -134,27 +138,32 @@ if (!isMain) {
 } else if (args[0] === 'all' || args.length === 0) {
   let failed = 0;
   const placings = {};
-  for (const difficulty of Object.keys(DIFFICULTY)) {
-    const run = simulate({ difficulty, laps: 3, steerNoise: 0 });
-    const problems = report(run);
-    placings[difficulty] = run.race.player.place;
-    if (problems.length) {
-      failed++;
-      console.log('PROBLEMS:');
-      for (const p of problems) console.log('  ! ' + p);
-    } else {
-      console.log('OK');
+  for (const spec of TRACKS) {
+    for (const difficulty of Object.keys(DIFFICULTY)) {
+      const run = simulate({ trackId: spec.id, difficulty, laps: 3 });
+      const problems = report(run);
+      placings[`${spec.id}/${difficulty}`] = run.race.player.place;
+      if (problems.length) {
+        failed++;
+        console.log('PROBLEMS:');
+        for (const p of problems) console.log('  ! ' + p);
+      } else {
+        console.log('OK');
+      }
     }
   }
-  console.log('\n=== player finishing position, holding the throttle flat ===');
-  for (const [d, p] of Object.entries(placings)) console.log(`  ${d.padEnd(8)} P${p}`);
-  if (placings.easy > 2) {
-    console.log('  ! easy should be winnable for a five-year-old');
-    failed++;
+  console.log('\n=== player position, holding the throttle flat ===');
+  for (const [k, p] of Object.entries(placings)) console.log(`  ${k.padEnd(16)} P${p}`);
+  for (const spec of TRACKS) {
+    if (placings[`${spec.id}/easy`] > 2) {
+      console.log(`  ! easy on ${spec.short} should be winnable for a five-year-old`);
+      failed++;
+    }
   }
   process.exit(failed ? 1 : 0);
 } else {
-  const problems = report(simulate({ difficulty: args[0], laps: Number(args[1] || 3), verbose: true }));
+  const problems = report(simulate({ trackId: args[0], difficulty: args[1] || 'easy',
+                                     laps: Number(args[2] || 3) }));
   if (problems.length) { console.log('PROBLEMS:'); problems.forEach((p) => console.log('  ! ' + p)); }
   process.exit(problems.length ? 1 : 0);
 }

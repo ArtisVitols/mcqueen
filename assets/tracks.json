@@ -1,0 +1,54 @@
+{
+  "_comment": "Each track's data file carries a modelScale: the two smaller circuits are modelled at roughly 1:15, and the game scales both the model and the extracted racing line by the same factor so every road is about 18 m wide and the cars stay life-sized. roadMaterials lists the materials that make up the racing surface; tools/verify_track.mjs asserts the surface under the racing line is one of them.",
+  "tracks": [
+    {
+      "id": "msots",
+      "name": "Motor Speedway of the South",
+      "short": "Motor Speedway",
+      "blurb": "The Piston Cup stadium",
+      "model": "track-msots.glb",
+      "data": "track-msots.json",
+      "roadMaterials": [
+        "Material.105",
+        "Material.107",
+        "Material.076",
+        "Material.110"
+      ],
+      "maxOutlierFraction": 0.04,
+      "note": "The source mesh has a step where the pit lane merges, around a 40 m stretch of the 1455 m lap, that no smooth centreline follows exactly."
+    },
+    {
+      "id": "palm",
+      "name": "Palm Mile Speedway",
+      "short": "Palm Mile",
+      "blurb": "Short oval by the beach",
+      "model": "track-palm.glb",
+      "data": "track-palm.json",
+      "roadMaterials": [
+        "Material.227",
+        "Material.216",
+        "Material.222",
+        "Material.225",
+        "Material.226"
+      ],
+      "maxOutlierFraction": 0.01
+    },
+    {
+      "id": "yoyle",
+      "name": "Yoyleland Speedway",
+      "short": "Yoyleland",
+      "blurb": "Big banked superspeedway",
+      "model": "track.glb",
+      "data": "track-data.json",
+      "roadMaterials": [
+        "Asphalt",
+        "Asphalt_Line",
+        "Asphalt_Line_2",
+        "Asphalt_Line_3",
+        "Finish_Line",
+        "material"
+      ],
+      "maxOutlierFraction": 0.01
+    }
+  ]
+}

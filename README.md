@@ -1,8 +1,8 @@
 # McQueen Speedway
 
 A 3D oval racing game for a phone browser, built for a five-year-old. Drive
-Lightning McQueen against six rivals from *Cars* around a NASCAR-style
-superspeedway.
+Lightning McQueen against six rivals from *Cars* around one of three
+NASCAR-style speedways.
 
 **Play: https://artisvitols.github.io/mcqueen/**
 
@@ -12,16 +12,29 @@ Open it on a phone, turn the phone sideways, tap START.
 
 - Left thumb: ◀ ▶ steer. Right thumb: ▲ gas, ▼ brake.
 - Five red lights, then green, then three laps. Lap counter is top right.
-- OPTIONS sets your car, laps (1/3/5), difficulty, graphics quality and sound.
+- OPTIONS sets your car, the circuit, laps (1/3/5), difficulty, graphics
+  quality and sound.
 - Difficulty is **Easy** by default: holding the throttle down is enough to
   win. Normal is close, Hard beats a flat-out player.
 
+## The circuits
+
+| Track | Lap | Notes |
+|---|---|---|
+| Motor Speedway of the South | 1455 m | The Piston Cup stadium from the first film |
+| Palm Mile Speedway | 1507 m | Short oval, infield lake, beach behind the stands |
+| Yoyleland Speedway | 2817 m | Big banked superspeedway, 18° in the turns |
+
+The two smaller circuits are modelled at roughly 1:15, so the game scales the
+model and the extracted racing line by the same factor - every road ends up
+about 18 m wide with life-sized cars.
+
 ## How it works
 
-The stadium mesh is 420k triangles, and nothing in the game raycasts against
-it. Instead `tools/extract_track.py` reads the speedway once, offline, and
-writes `assets/track-data.json`: the oval as 1200 centreline stations with
-per-station width, surface height and banking.
+The biggest stadium mesh is 420k triangles, and nothing in the game raycasts
+against it. Instead each circuit is read once, offline, into a data file: the
+oval as 1200 centreline stations with per-station width, surface height and
+banking.
 
 Every car then lives in **track space** as `(s, n)` - distance along the
 centreline, and metres sideways from it. That one decision buys a lot:
@@ -35,6 +48,16 @@ centreline, and metres sideways from it. That one decision buys a lot:
 - The inside line is genuinely shorter, because the arc-length scale factor
   `1 + n·κ` is baked into the integration - so the low line pays, like it does
   in real NASCAR.
+
+Finding the road is the hard part, and it differs per circuit. Yoyleland names
+its materials `Asphalt`; the other two export 90-odd materials all called
+`Material.nnn`, and classifying pixels by colour fails because infields contain
+grey tarmac and grandstands contain green seats. What works is
+`tools/topdown.mjs`: render the model from directly overhead three times -
+colour, world height, and a material-ID pass where each material gets a unique
+flat colour. Name the road's materials once (`tools/probe_points.mjs` finds
+them) and the mask is exact. Watch out for pit lanes sharing the road's
+material - including one put the entire field under the pit awnings.
 
 One trap worth knowing about if you touch the asset pipeline: Sketchfab stored
 the speedway in a local space spanning about ±3,000,000 units, scaled down to
@@ -76,14 +99,24 @@ needs neither.
 python3 -m http.server 8000        # then open http://localhost:8000
 
 bash  tools/fetch_assets.sh        # re-download the source models into raw/
-python3 tools/extract_track.py     # rebuild assets/track-data.json (+ validates)
-bash  tools/optimize.sh            # bake + recompress models into assets/
+bash  tools/optimize.sh            # bake + recompress every model into assets/
 python3 tools/render_cars.py       # contact sheets to check model orientation
 
-node  tools/simulate.mjs all       # headless race: laps, limits, difficulty
-node  tools/verify_track.mjs       # shipped track vs physics data - run this!
+# Racing lines. Yoyleland has its own extractor (its materials are named);
+# the other two go through the overhead-render route.
+python3 tools/extract_track.py             # -> assets/track-data.json
+node  tools/topdown.mjs raw/x.glb palm     # -> build/palm_{colour,height,id}.png
+python3 tools/extract_oval.py palm         # -> assets/track-palm.json
+node  tools/refine_track.mjs palm          # heights/banking by raycasting the asset
+
+python3 tools/inspect_track.py raw/x.glb   # materials, scale, overhead map
+node  tools/probe_points.mjs raw/x.glb 1,2 # what is actually at a world point
+
+node  tools/simulate.mjs all       # headless races: every track x difficulty
+node  tools/verify_track.mjs       # shipped tracks vs physics data - run this!
 node  tools/check_ride_height.mjs  # gap between each car and the road
 node  tools/shots.mjs              # drive the real game in headless Chrome
+node  tools/shots_tracks.mjs       # ... on every circuit
 ```
 
 `tools/simulate.mjs` runs the actual `Track`/`Car`/`Driver`/`Race` code with no
@@ -99,6 +132,8 @@ family project:
 
 - **Lightning McQueen** — [Guilherme Navarro](https://sketchfab.com/3d-models/lightning-mcqueen-cars-987dfeaab6e84bc094b707e77c96f45d)
 - **Yoyleland International Speedway** — [RedUnLuckyBlockOSC](https://sketchfab.com/3d-models/yoyleland-international-speedway-nascar-x-bfdi-c6aa0b11a789415b8fe7b2ac8a122db1)
+- **Motor Speedway of the South** and **Palm Mile Speedway** are likewise
+  Sketchfab community uploads of the Cars circuits
 - Chick Hicks, The King, Francesco Bernoulli, Jackson Storm, Mater and Doc
   Hudson are likewise Sketchfab community uploads.
 

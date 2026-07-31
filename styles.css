@@ -165,6 +165,11 @@ button.big.ghost {
 }
 .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.card.track { flex: 1 1 170px; flex-direction: column; align-items: flex-start; gap: 2px; }
+.tname { font-weight: 800; }
+.tblurb { font-size: 0.82em; opacity: 0.6; }
+#track-picker.busy { opacity: 0.45; pointer-events: none; }
+
 .opt-grid {
   display: grid;
   /* Wide enough that Easy/Normal/Hard stays on one line. */

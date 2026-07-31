@@ -20,6 +20,8 @@ dl 1_deQFaSSXjsE0XpQZeWj2O7JlIZshsQF jackson_storm.glb
 dl 1IJE3vNou8K6JqshdZVLscvhYFMHU9Vtt mater.glb
 dl 1z4iN5vIWUhcE7erlPGlgp1zsh8NaVrN- doc_hudson.zip
 dl 19aGhX9W7IiqlQ49xtTzVTBJ_qmjTMT6A speedway.glb
+dl 1LjtNoYQuki08Cjl-4lzOaMB_TvDDgUGo motor_speedway_of_the_south.glb
+dl 1Afjldi0myxASoDico8WBZYHkffamog6J palm_mile_speedway.glb
 
 if [ ! -s raw/doc_hudson.glb ]; then
   python3 -c "
