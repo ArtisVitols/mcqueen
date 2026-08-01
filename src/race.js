@@ -11,10 +11,8 @@ import { DIFFICULTY } from './settings.js';
 const FIXED_DT = 1 / 120;
 const MAX_STEPS = 8;
 const GRID_ROW_GAP = 9;      // metres between rows
-// Lateral offset of the two grid columns. Overridden per circuit, because the
-// racing surface is not always centred on the racing line: at Motor Speedway
-// the start straight has a wide apron on the outside, and a symmetric grid put
-// half the field on it, outside the white line.
+// Lateral offset of the two grid columns, where the road is wide enough for
+// it. fitGridLanes() pulls them in where it is not.
 const GRID_LANE = 3.2;
 const COUNTDOWN_STEP = 0.9;  // seconds between red lights
 
@@ -56,6 +54,8 @@ export class Race {
       return b.spec.pace - a.spec.pace;
     });
 
+    const lanes = this.fitGridLanes(Math.ceil(order.length / 2));
+
     order.forEach((entry, i) => {
       const car = new Car(entry.spec, entry.object, track);
       car.isPlayer = entry.spec.id === playerId;
@@ -63,7 +63,6 @@ export class Race {
       car.topSpeed = 78 * (car.isPlayer ? this.tuning.playerSpeed : this.tuning.aiSpeed);
 
       const row = Math.floor(i / 2);
-      const lanes = this.gridLanes || [-GRID_LANE, GRID_LANE];
       // Row 0 sits just behind the line; the pack stretches back from there.
       car.placeOnGrid(12 + row * GRID_ROW_GAP, lanes[i % 2]);
       car.gridIndex = i;
@@ -76,6 +75,32 @@ export class Race {
     this.order = [...this.field];
     this.updateOrder();
     return this;
+  }
+
+  /**
+   * Two starting columns that actually fit the road where the field lines up.
+   *
+   * The grid is laid out in track space, so it lands wherever the racing
+   * line's lateral offsets put it - and on a pit straight the racing surface
+   * is narrower and off-centre, because the pit lane takes part of the width
+   * and a wall separates the two. A fixed symmetric grid put half the field on
+   * the wrong side of that wall. This measures the corridor across every grid
+   * row and centres the columns in what is actually there.
+   */
+  fitGridLanes(rows) {
+    let lo = -Infinity;
+    let hi = Infinity;
+    const st = {};
+    for (let r = 0; r < rows; r++) {
+      this.track.sample(-(12 + r * GRID_ROW_GAP), st);
+      lo = Math.max(lo, this.track.limit(st, -1));
+      hi = Math.min(hi, this.track.limit(st, 1));
+    }
+    const want = this.gridLanes || [-GRID_LANE, GRID_LANE];
+    if (want.every((v) => v >= lo && v <= hi)) return want;
+    const centre = (lo + hi) / 2;
+    const half = Math.min(GRID_LANE, Math.max(0.5, (hi - lo) / 2 - 0.6));
+    return [centre - half, centre + half];
   }
 
   /** Advance the race. `input` drives the player car once the lights go out. */
@@ -182,18 +207,31 @@ export class Race {
         const dn = b.n - a.n;
         const overlap = 2.3 - Math.abs(dn);
         if (overlap <= 0) continue;
-        const push = (dn >= 0 ? 1 : -1) * overlap * 0.5;
-        a.n -= push;
-        b.n += push;
-        // Shoving must not put anyone over the edge the car model just
-        // clamped them to.
+
+        // Move each of them away from the other, but only as far as the road
+        // allows. Shoving them the full distance regardless is how the field
+        // ended up outside the corridor wherever the track narrows.
+        const dir = dn >= 0 ? 1 : -1;
+        const want = overlap * 0.5;
+        a.n -= dir * Math.min(want, this.room(a, -dir));
+        b.n += dir * Math.min(want, this.room(b, dir));
         this.clampLateral(a);
         this.clampLateral(b);
-        // Trailing car loses a little speed, like real contact.
+
+        // If they still overlap there is simply no room to run side by side
+        // here, so the car behind lifts rather than being pushed off the road.
+        const left = 2.3 - Math.abs(b.n - a.n);
         const behind = ds > 0 ? a : b;
-        behind.speed *= 0.995;
+        behind.speed *= left > 0 ? 1 - Math.min(0.2, left * 0.12) : 0.995;
       }
     }
+  }
+
+  /** How much further this car can move towards `sign` before leaving the road. */
+  room(car, sign) {
+    const st = this.track.sample(car.s, car.st);
+    const lim = this.track.limit(st, sign);
+    return Math.max(0, sign > 0 ? lim - car.n : car.n - lim);
   }
 
   clampLateral(car) {

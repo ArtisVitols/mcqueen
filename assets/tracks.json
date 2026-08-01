@@ -1,5 +1,5 @@
 {
-  "_comment": "Each track's data file carries a modelScale: the two smaller circuits are modelled at roughly 1:15, and the game scales both the model and the extracted racing line by the same factor so every road is about 18 m wide and the cars stay life-sized. roadMaterials lists the materials that make up the racing surface; tools/verify_track.mjs asserts the surface under the racing line is one of them. asphalt (optional) names materials to restyle as road surface: the Yoyleland tarmac is untextured and washes out to a pale brown under the sun, which hides both the banking and the cars' shadows. gridLanes (optional) overrides the two starting columns where the racing surface is not centred on the racing line.",
+  "_comment": "Each track's data file carries a modelScale: the two smaller circuits are modelled at roughly 1:15, and the game scales both the model and the extracted racing line by the same factor so every road is about 18 m wide and the cars stay life-sized. roadMaterials lists the materials that make up the racing surface; tools/verify_track.mjs asserts the surface under the racing line is one of them. asphalt (optional) names materials to restyle as road surface: the Yoyleland tarmac is untextured and washes out to a pale brown under the sun, which hides both the banking and the cars' shadows. gridLanes (optional) pins the two starting columns; normally Race.fitGridLanes measures the corridor across the grid rows and centres them itself.",
   "tracks": [
     {
       "id": "msots",
@@ -14,11 +14,7 @@
         "Material.076",
         "Material.110"
       ],
-      "maxOutlierFraction": 0.01,
-      "gridLanes": [
-        -4.2,
-        -1.3
-      ]
+      "maxOutlierFraction": 0.01
     },
     {
       "id": "palm",

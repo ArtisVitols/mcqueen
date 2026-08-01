@@ -41,7 +41,7 @@ process.on('exit', () => server.kill());
 await new Promise((r) => setTimeout(r, 1200));
 
 const browser = await puppeteer.launch({
-  executablePath: CHROME, headless: true,
+  executablePath: CHROME, headless: true, protocolTimeout: 1800000,
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
 });
 const page = await browser.newPage();
@@ -85,6 +85,10 @@ for (const spec of todo) {
     const down = new THREE.Vector3(0, -1, 0);
     const origin = new THREE.Vector3();
     const p = new THREE.Vector3();
+    const a = new THREE.Vector3();
+    const bpt = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const nrm = new THREE.Vector3();
 
     /** Surface height at (s, n), picking the hit nearest `expect`. */
     const surfaceAt = (st, n, expect) => {
@@ -107,6 +111,9 @@ for (const spec of todo) {
     // way - enough for the field to race without the corridor spilling onto
     // the apron.
     const MAX_HALF = 6.5;
+    const MIN_HALF = 1.8;       // never collapse the corridor entirely
+    const STEP_TOL = 0.20;      // metres of height change allowed per 0.25 m step
+    const BUMPER = 0.5;         // height the sideways barrier ray is fired at
     // Where the cross-section is sampled, as fractions of the half-width.
     const PROF_FRACTIONS = [-1, -0.5, 0, 0.5, 1];
     const N = track.count;
@@ -115,6 +122,8 @@ for (const spec of todo) {
     // AI put a wheel somewhere that is not road.
     const out = { y: new Array(N), bank: new Array(N),
                   outW: new Array(N), inW: new Array(N), profile: [] };
+    const rawOut = new Array(N);
+    const rawIn = new Array(N);
     let expect = ys[0];
     let misses = 0;
 
@@ -123,12 +132,57 @@ for (const spec of todo) {
       const yc = surfaceAt(st, 0, expect);
       if (yc === null) { misses++; out.y[i] = expect; } else { out.y[i] = yc; expect = yc; }
 
+      // Walk out to the real edge of the road: stop at a step down, at a hole,
+      // or at anything standing in the way. The road mask alone is too
+      // generous - it ran Palm Mile's corridor to the lip of a 0.7 m drop the
+      // bodywork then hung over, and put Motor Speedway's outside lane through
+      // the pit wall.
+      const edge = (sign) => {
+        let last = 1.0;
+        let prevY = out.y[i];
+        for (let d = 0.5; d <= MAX_HALF; d += 0.25) {
+          const h = surfaceAt(st, sign * d, prevY);
+          if (h === null) break;                       // no surface at all
+          if (Math.abs(h - prevY) > STEP_TOL) break;   // a step or a drop
+          // Anything standing between the last sample and this one, at bumper
+          // height, is a wall. The ray follows the surface so it does not
+          // simply hit the banking climbing away from it.
+          //
+          // Height comes from the raycast, never from track.position(): the
+          // loaded data still holds the overhead extraction's surface, which
+          // on Palm Mile sits up to a metre under the road. Fired off that,
+          // the ray runs *inside* the asphalt and reports the start straight
+          // as walled off, which collapsed its corridor to the minimum.
+          track.position(st, sign * (d - 0.25), a);
+          a.y = prevY + BUMPER;
+          track.position(st, sign * d, bpt);
+          bpt.y = h + BUMPER;
+          dir.copy(bpt).sub(a);
+          const span = dir.length();
+          if (span > 1e-6) {
+            ray.set(a, dir.normalize());
+            ray.far = span;
+            const blocked = ray.intersectObjects(ground, false)
+              .some((x) => x.distance > 0.05);
+            ray.far = 400;
+            if (blocked) break;
+          }
+          last = d;
+          prevY = h;
+        }
+        return Math.max(MIN_HALF, last);
+      };
+      out.outW[i] = Math.min(data0.outW[i], edge(1));
+      out.inW[i] = Math.min(data0.inW[i], edge(-1));
+      rawOut[i] = out.outW[i];
+      rawIn[i] = out.inW[i];
+
       // Measure the cross-section rather than fitting a plane to it. These
       // roads are banked and low-poly, so the surface curves between facets;
       // forcing one slope through it left cars hovering at the edges however
       // the fit was weighted, and trimming the road back to where a plane did
       // fit just made the circuit too narrow to race on.
-      const half = Math.min(MAX_HALF, Math.min(data0.outW[i], data0.inW[i]));
+      const half = Math.min(out.outW[i], out.inW[i]);
       const offs = PROF_FRACTIONS.map((f) => f * half);
       const rel = [];
       let prev = 0;
@@ -139,8 +193,6 @@ for (const spec of todo) {
         prev = r;
       }
       out.profile.push({ offs, rel });
-      out.outW[i] = Math.min(data0.outW[i], MAX_HALF);
-      out.inW[i] = Math.min(data0.inW[i], MAX_HALF);
 
     }
 
@@ -193,12 +245,79 @@ for (const spec of todo) {
       const span = profOffsets[3] - profOffsets[1];
       return span > 1e-9 ? Math.atan((hi - lo) / span) : 0;
     });
-    out.outW = smooth(out.outW, 8, 2);
-    out.inW = smooth(out.inW, 8, 2);
+    // Smooth for a clean edge, but never wider than measured: smoothing alone
+    // bulges the corridor back over a wall at the few stations either side of
+    // it, which is enough for a car to clip through.
+    out.outW = smooth(out.outW, 8, 2).map((v, i) => Math.min(v, rawOut[i]));
+    out.inW = smooth(out.inW, 8, 2).map((v, i) => Math.min(v, rawIn[i]));
+
+    // Final sweep: drive a ray the whole way across the finished corridor at
+    // bumper height, exactly as check_barriers.mjs does, and pull the edge in
+    // behind anything it hits.
+    //
+    // Walking outwards from the centreline is not enough on its own. Motor
+    // Speedway's pit wall stands on the road with the asphalt continuing level
+    // underneath it and through the gap at the pit entry, so at a handful of
+    // stations the outward walk stepped over the wall's footing and carried on
+    // to the pit lane beyond. This pass tests the corridor the game will
+    // actually hand to the cars, so what it clears is what they can reach.
+    const EDGE = 1.6;           // Track.limit's margin for the car's own width
+    const CLEAR = 0.1;          // keep the limit this far short of the wall
+    // Measure against the surface just derived, not the one loaded at the top.
+    // `track` still carries the overhead extraction's heights - the very thing
+    // this script exists to replace - and on Palm Mile those sit up to a metre
+    // under the road, which puts a bumper-height ray inside the asphalt and
+    // reports the track itself as a wall.
+    const refined = new Track({
+      ...track.data, y: out.y, bank: out.bank, outW: out.outW, inW: out.inW,
+      profOffsets: out.profOffsets, profile: out.flatProfile,
+    });
+    const wall = (i) => {
+      const st = refined.sample(i * refined.step, {});
+      const lo = -(out.inW[i] - EDGE);
+      const hi = out.outW[i] - EDGE;
+      if (hi <= lo) return null;
+      for (let n = lo; n < hi - 1e-6; n += 0.25) {
+        const b = Math.min(n + 0.25, hi);
+        refined.position(st, n, a);
+        a.addScaledVector(refined.normal(st, nrm, n), BUMPER);
+        refined.position(st, b, bpt);
+        bpt.addScaledVector(refined.normal(st, nrm, b), BUMPER);
+        dir.copy(bpt).sub(a);
+        const span = dir.length();
+        if (span < 1e-6) continue;
+        ray.set(a, dir.normalize());
+        ray.far = span;
+        const hit = ray.intersectObjects(ground, false).length > 0;
+        ray.far = 400;
+        if (hit) return n;
+      }
+      return null;
+    };
+    let trimmed = 0;
+    const cutOut = out.outW.slice();
+    const cutIn = out.inW.slice();
+    for (let i = 0; i < N; i++) {
+      const nb = wall(i);
+      if (nb === null) continue;
+      trimmed++;
+      if (nb >= 0) cutOut[i] = Math.max(MIN_HALF, Math.min(cutOut[i], nb + EDGE - CLEAR));
+      else cutIn[i] = Math.max(MIN_HALF, Math.min(cutIn[i], -nb + EDGE - CLEAR));
+    }
+    // Spread each cut over its neighbours so the edge tapers instead of
+    // notching in and out around a wall that is only caught at some stations.
+    const minWindow = (arr, w) => arr.map((_, i) => {
+      let m = Infinity;
+      for (let k = -w; k <= w; k++) m = Math.min(m, arr[(i + k + N) % N]);
+      return m;
+    });
+    out.outW = minWindow(cutOut, 4);
+    out.inW = minWindow(cutIn, 4);
+    out.trimmed = trimmed;
 
     const deg = out.bank.map((b) => b * 180 / Math.PI);
     return {
-      misses,
+      misses, trimmed: out.trimmed,
       y: out.y.map((v) => +v.toFixed(3)),
       bank: out.bank.map((v) => +v.toFixed(5)),
       outW: out.outW, inW: out.inW,
@@ -223,6 +342,7 @@ for (const spec of todo) {
 
   const s = result.summary;
   console.log(`  stations with no surface found: ${result.misses} / ${data.stationCount}`);
+  console.log(`  stations trimmed behind a wall: ${result.trimmed}`);
   console.log(`  height  ${before.yMin.toFixed(2)}..${before.yMax.toFixed(2)} m  ->  ` +
               `${s.yMin.toFixed(2)}..${s.yMax.toFixed(2)} m`);
   console.log(`  bank    ${s.bankMin.toFixed(1)}..${s.bankMax.toFixed(1)} deg`);

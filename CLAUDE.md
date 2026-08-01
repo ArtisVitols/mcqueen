@@ -193,11 +193,43 @@ entry is correct; a car floating over the gap is not.
   running it twice compounds the width trimming. Always run `extract_oval.py`
   first.
 - **The grid is laid out in track space**, so it lands wherever the racing
-  line's lateral offsets put it. At Motor Speedway the start straight has a
-  wide apron outside the white line and a symmetric grid put half the field on
-  it. `gridLanes` in `tracks.json` overrides the two columns per circuit.
-  `Track.limit` also reserves a full half-car-width (1.6 m), or the bodywork
-  hangs over the edge even though the car's centre is legal.
+  line's lateral offsets put it. Motor Speedway's start straight is the pit
+  straight: the racing surface there runs roughly `n = -6.8 .. +0.8`, with the
+  pit wall at `+1.1` and the pit lane beyond it, so a symmetric grid started
+  half the field in the pits. `Race.fitGridLanes` measures the corridor across
+  every grid row and centres the two columns in what is actually there;
+  `gridLanes` in `tracks.json` is only an override for when that is not the
+  look you want, and no circuit needs one today. `Track.limit` also reserves a
+  full half-car-width (1.6 m), or the bodywork hangs over the edge even though
+  the car's centre is legal. `tools/simulate.mjs` builds its `Race` the same
+  way the game does — if it ever stops doing that it will pass on a grid
+  nobody races.
+- **The corridor has to stop at drops and walls, not at the road mask.**
+  `extract_oval.py` marks anything that looks like road, which included the lip
+  of a 0.7 m drop on Palm Mile's outside line (the bodywork hung over it) and
+  the pit lane past Motor Speedway's wall (cars drove straight through it).
+  `refine_track.mjs` now walks outward from the centreline in 0.25 m steps and
+  stops at a step in height, a missing surface, or anything standing at bumper
+  height, then sweeps the finished corridor edge to edge as a check.
+  `tools/check_barriers.mjs` is the independent verification: it must report
+  zero barriers and zero holes.
+- **Nothing in `refine_track.mjs` may take a height from `track.position()`.**
+  The `Track` it loads still holds the overhead extraction's surface — the very
+  thing the script exists to replace — and on Palm Mile that sits up to a metre
+  under the road. The barrier rays were fired off it, so they ran *inside* the
+  asphalt, reported the start straight as walled off on both sides, and
+  collapsed a 13 m road to the 3.6 m minimum. Every ray takes its Y from the
+  downward raycast; the final sweep builds a fresh `Track` from the refined
+  arrays. Symptom to watch for: widths pinned at `MIN_HALF` over long stretches
+  of a road that verify_track says is perfectly flat.
+- **Smoothing a corridor must never widen it.** A moving average over the
+  measured widths bulges back over a wall at the few stations either side of
+  it, which is enough to clip through. Take `Math.min(smoothed, measured)`.
+- **One missing raycast sample is not a hole.** Palm Mile has a single 5 cm
+  ray miss on the seam between its two asphalt materials, with continuous
+  surface either side — a ray slipping through a shared triangle edge. A gap a
+  car can drop into is metres wide, so `check_barriers.mjs` only counts a miss
+  with a missing neighbour.
 - **Untextured renders are not enough to judge which way a car faces.** Reading
   a grey silhouette wrong had Chick Hicks racing backwards for a release. These
   characters have eyes on the windscreen — render textured and look.
@@ -218,6 +250,7 @@ node tools/check_ride_height.mjs   # gap between each car and the road
 node tools/diag_cars.mjs <track>   # car facing + wheels on a reference plane
 node tools/lap_tour.mjs <track>    # chase cam all the way round a lap
 node tools/check_grid.mjs          # what surface each starting slot sits on
+node tools/check_barriers.mjs      # walls inside the corridor, holes under the car
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout
 python3 tools/overlay_line.py <t>  # racing line drawn on the overhead render
@@ -242,6 +275,14 @@ What "good" looks like right now:
 - `verify_track.mjs` — median height error 3 mm / 3 mm / 34 mm, and under
   0.2% of points past 0.5 m on all three. The **median** is the signal that
   catches systemic drift.
+- `check_barriers.mjs` — zero barriers and zero holes on Motor Speedway and
+  Palm Mile. Yoyleland still reports both: its road genuinely is wide, so
+  `refine_track`'s `MAX_HALF` would trim it wrongly, and it came through the
+  other extraction route. Nobody has complained about it; fixing it needs a
+  per-track `MAX_HALF` first.
+- `check_grid.mjs` — every slot on the racing surface: `Material.107` on Motor
+  Speedway, `Material.227` on Palm Mile, `Asphalt` on Yoyleland. Anything else
+  and somebody is starting in the pits.
 - Ride quality: vertical jitter under ~0.5 g at 50 m/s and yaw wobble under
   0.1 deg per station. Above about 1 g the car visibly shakes.
 - A session downloads ~3.5 MB and reaches the menu in about 5 s, because only

@@ -44,13 +44,16 @@ export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3
   const track = new Track(read(`assets/${spec.data}`));
   const specs = read('assets/cars.json').cars;
 
-  const entries = specs.map((spec) => ({ spec, object: new THREE.Object3D() }));
-  const race = new Race(track, entries, { difficulty, laps, car: playerId }).build(playerId);
+  const entries = specs.map((carSpec) => ({ spec: carSpec, object: new THREE.Object3D() }));
+  // gridLanes has to come through, or the sim races a grid the game never uses
+  // and quietly misses cars starting outside the corridor.
+  const race = new Race(track, entries, { difficulty, laps, car: playerId },
+                        spec.gridLanes).build(playerId);
 
   const input = new FlatOut(steerNoise);
   const stats = {
     offTrack: 0, maxLateral: 0, minSpeed: Infinity, maxSpeed: 0,
-    laneChanges: 0, overtakes: 0, contact: 0,
+    laneChanges: 0, overtakes: 0, contact: 0, offExamples: [],
   };
   const lapCrossings = new Map(race.field.map((c) => [c, 0]));
   let prevOrder = race.order.map((c) => c.spec.id);
@@ -66,7 +69,16 @@ export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3
       const st = track.sample(car.s, {});
       const outer = track.limit(st, 1);
       const inner = track.limit(st, -1);
-      if (car.n > outer + 0.05 || car.n < inner - 0.05) stats.offTrack++;
+      if (car.n > outer + 0.05 || car.n < inner - 0.05) {
+        stats.offTrack++;
+        if (stats.offExamples.length < 5) {
+          stats.offExamples.push({
+            car: car.spec.id, s: Math.round(car.s), n: +car.n.toFixed(2),
+            lo: +inner.toFixed(2), hi: +outer.toFixed(2),
+            outW: +st.outW.toFixed(2), inW: +st.inW.toFixed(2),
+          });
+        }
+      }
       stats.maxLateral = Math.max(stats.maxLateral, Math.abs(car.n));
       if (race.state === State.RACING && !car.finished) {
         stats.minSpeed = Math.min(stats.minSpeed, car.speed);
@@ -112,7 +124,10 @@ function report(run) {
 
   const problems = [];
   if (race.state !== State.FINISHED) problems.push('race did not finish inside the time limit');
-  if (stats.offTrack > 0) problems.push(`${stats.offTrack} samples off the racing surface`);
+  if (stats.offTrack > 0) {
+    problems.push(`${stats.offTrack} samples off the racing surface: ` +
+                  JSON.stringify(stats.offExamples));
+  }
   // Cars start behind the line on lap 1, so a 3-lap race shows 1->2 and 2->3:
   // one fewer increment than there are laps.
   for (const [car, crossings] of run.lapCrossings) {
