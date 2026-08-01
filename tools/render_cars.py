@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Software-render each car to a PNG contact sheet.
+"""Software-render each car to a PNG contact sheet, without a browser.
 
-Used to work out each model's forward axis and upright orientation without a
-browser. Orthographic projection with a z-buffer and flat shading is plenty to
-recognise which way a car is pointing.
+Good for dimensions and for spotting a model that is upside down or the wrong
+size. Its output is flat-shaded and untextured.
+
+**Do not use it to decide which way a car faces.** Reading a grey silhouette
+wrong had Chick Hicks racing backwards for a release: these characters have
+eyes on the windscreen, and without the texture there is nothing reliable to
+read. Use tools/diag_cars.mjs, which renders them textured from the front.
 
 Writes ~/mcqueen-shots/cars_<view>.png
 """

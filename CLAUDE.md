@@ -227,6 +227,13 @@ python3 tools/stamp_version.py --check
 `tools/smoke.html` (served, then opened via `tools/browser.py`) checks every
 asset loads and each car normalises to its real size.
 
+Supporting bits: `tools/glb.py` is the stdlib-only GLB reader the Python tools
+share, `tools/probe_candidates.mjs` compares the surface of several compression
+builds when changing `optimize.sh`, and `tools/render_cars.py` renders car
+contact sheets without a browser - useful for dimensions, but **not** for
+deciding which way a car faces; it is untextured, and that is what got Chick
+Hicks shipped backwards.
+
 What "good" looks like right now:
 
 - `simulate.mjs all` — 9 OK. Easy is P1 on every circuit, Hard beats a

@@ -1,17 +1,24 @@
 /**
- * Re-derive a track's heights, widths and banking by raycasting the shipped
- * model, and write them back into its data file.
+ * Re-derive a track's surface by raycasting the shipped model, and write it
+ * back into the data file.
  *
  * extract_oval.py gets the racing line's shape right - that comes from an
  * overhead render at good resolution - but its heights come from the same
  * render, whose effective vertical sampling is a pixel wide once a 1:15 model
- * is scaled up. That was leaving the physics surface up to two metres off the
- * rendered road.
- *
+ * is scaled up. That left the physics surface up to two metres off the road.
  * Raycasting the asset the game actually loads makes the two agree by
  * construction, which is the only way this stays fixed.
  *
- *   node tools/refine_track.mjs msots palm
+ * What it writes is a measured cross-section (`profOffsets` + `profile`), not
+ * a single cross-slope. These roads are banked and low-poly, so the surface
+ * curves between facets and no plane fits it: forcing one cost 11 cm of
+ * typical height error, and narrowing the road to where a plane did fit left
+ * it too tight to race on. The profile gets both - 3 mm at full width.
+ *
+ * Not idempotent: it reads the file it writes, so always run extract_oval.py
+ * first or the width capping compounds.
+ *
+ *   python3 tools/extract_oval.py msots && node tools/refine_track.mjs msots
  */
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -95,18 +102,16 @@ for (const spec of todo) {
     };
 
     if (!ground.length) throw new Error('no ground meshes in the height band');
-    // Beyond this the real cross-section curves away from any single plane,
-    // so the racing surface is trimmed to where the model is honest.
+    // Widest half-road we will model. Track.limit() then takes 1.6 m off each
+    // side for the car's own width, leaving about 5 m of usable lane either
+    // way - enough for the field to race without the corridor spilling onto
+    // the apron.
     const MAX_HALF = 6.5;
-    // The corridor still has to hold a race: Track.limit() takes 1.6 m off
-    // each side for the car's own width, so anything under about 4 m here
-    // leaves less than two car widths and the field grinds against the clamp.
-
-    // Lateral sample points, as fractions of the usable half-width.
+    // Where the cross-section is sampled, as fractions of the half-width.
     const PROF_FRACTIONS = [-1, -0.5, 0, 0.5, 1];
     const N = track.count;
-    // Widths stay as extract_oval.py measured them off the road mask: walking
-    // outwards by raycast happily wanders onto the apron, which then lets the
+    // Widths come from extract_oval.py's road mask, only capped here: walking
+    // outwards by raycast happily wanders onto the apron, which would let the
     // AI put a wheel somewhere that is not road.
     const out = { y: new Array(N), bank: new Array(N),
                   outW: new Array(N), inW: new Array(N), profile: [] };
