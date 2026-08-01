@@ -17,6 +17,7 @@ const GRID_ROW_GAP = 9;      // metres between rows
 const GRID_LANE = 3.2;
 const COUNTDOWN_STEP = 0.9;  // seconds between red lights
 const DRAFT_RANGE = 34;      // metres, matches the AI's own draft window
+const BASE_SPEED = 78;       // m/s that every pace figure is a fraction of
 
 export const State = {
   COUNTDOWN: 'countdown',
@@ -83,7 +84,9 @@ export class Race {
       car.isPlayer = humans.has(entry.spec.id);
       car.isLocal = entry.spec.id === playerId;
       car.totalLaps = this.totalLaps;
-      car.topSpeed = 78 * (car.isPlayer ? this.tuning.playerSpeed : this.tuning.aiSpeed);
+      car.topSpeed = BASE_SPEED * (car.isPlayer ? this.tuning.playerSpeed
+        : Math.max(this.tuning.aiSpeed, this.tuning.chaseSpeed ?? this.tuning.aiSpeed));
+      car.baseSpeed = BASE_SPEED;
       // The grip assist is the humans'; rivals are paced by aiSpeed. Each
       // human may carry a different one - see `setAssist` - because a parent
       // and a five-year-old need very different help off the same grid.
@@ -121,7 +124,8 @@ export class Race {
     this.inputs.delete(car);
     car.assist = 1;
     car.lift = 0;
-    car.topSpeed = 78 * this.tuning.aiSpeed;
+    car.topSpeed = BASE_SPEED * Math.max(this.tuning.aiSpeed,
+      this.tuning.chaseSpeed ?? this.tuning.aiSpeed);
     this.drivers.push(new Driver(car, car.spec, this.rng));
   }
 
@@ -300,7 +304,17 @@ export class Race {
     // its top speed, so the band has to reach the corner cap as well or Easy
     // quietly stops reeling anybody in.
     car.paceScale = 1 + norm * band * scale;
-    car.topSpeed = 78 * this.tuning.aiSpeed * car.paceScale;
+    // Two different numbers, and conflating them cost an afternoon.
+    //
+    // `baseSpeed` is what the driver aims at, and the driver scales it by
+    // whichever pace its grudge calls for. `topSpeed` is the rev limiter in
+    // `Car.step`, which clamps regardless of what anybody asked for - so it
+    // has to admit the *chasing* pace or the fight-back is computed and then
+    // thrown away one line later. Raising them together instead just makes
+    // the whole field permanently faster.
+    const t = this.tuning;
+    car.baseSpeed = BASE_SPEED * car.paceScale;
+    car.topSpeed = BASE_SPEED * Math.max(t.aiSpeed, t.chaseSpeed ?? t.aiSpeed) * car.paceScale;
   }
 
   /** How deep in another car's tow this car is, 0..1. */

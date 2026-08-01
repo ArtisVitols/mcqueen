@@ -206,11 +206,24 @@ if (!isMain) {
   console.log('\n=== player position, holding the throttle flat ===');
   for (const [k, p] of Object.entries(placings)) console.log(`  ${k.padEnd(24)} P${p}`);
   // A five-year-old can tap any entry in the menu, so Easy has to be winnable
-  // under every handling model, not just the default one.
+  // by holding the throttle down - under every model that has a driver aid.
+  //
+  // Pro deliberately has none: it is the one where the car does nothing you
+  // did not ask it to, which is the whole point of it and what the owner
+  // asked for. Holding the throttle there gets you round, because a car with
+  // no steering input still follows the road in track space, but it will not
+  // win - you have to actually drive. What is still required is that it
+  // finishes and is not hopeless.
   for (const physics of Object.keys(PHYSICS)) {
+    const aided = PHYSICS[physics].assisted || physics === 'arcade';
     for (const spec of TRACKS) {
-      if (placings[`${physics}/${spec.id}/easy`] > 2) {
+      const place = placings[`${physics}/${spec.id}/easy`];
+      if (aided && place > 2) {
         console.log(`  ! easy on ${spec.short} / ${PHYSICS[physics].label} should be winnable`);
+        failed++;
+      } else if (!aided && place > 4) {
+        console.log(`  ! easy on ${spec.short} / ${PHYSICS[physics].label} is hopeless ` +
+                    `without aids (P${place}) - it should still be driveable`);
         failed++;
       }
     }

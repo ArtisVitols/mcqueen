@@ -157,10 +157,13 @@ for (const spec of TRACKS) {
   }
 }
 
-console.log('\nWeaving on the straights: how much the whole field swings side to side.');
+console.log('\nWeaving on the straights: how much the field swings side to side.');
 console.log('A swing is a there-and-back excursion of more than half a metre. Only the');
 console.log('straight sections are counted - a car running wide through a corner and');
-console.log('coming back is using the road, which is what it is supposed to do.\n');
+console.log('coming back is using the road, which is what it is supposed to do. And');
+console.log('only cars that are being *driven*: under a model with no driver aid, a');
+console.log('player holding no buttons has nothing keeping it in a lane, and wandering');
+console.log('is then the correct behaviour rather than a defect.\n');
 console.log('  track  physics    swings/lap   mean swing   worst car');
 
 /**
@@ -225,12 +228,14 @@ for (const spec of TRACKS) {
     }
     let total = 0, amp = 0, worst = 0, worstCar = '';
     race.field.forEach((c, i) => {
+      if (c === player && !PHYSICS[physics].assisted) return;
       const a = runs(traces[i]).flatMap((r) => swings(r));
       total += a.length;
       amp += a.reduce((x, y) => x + y, 0);
       if (a.length > worst) { worst = a.length; worstCar = c.spec.id; }
     });
-    const per = total / race.field.length;
+    const driven = race.field.length - (PHYSICS[physics].assisted ? 0 : 1);
+    const per = total / driven;
     const mean = total ? amp / total : 0;
     const bad = per > 6;
     console.log(`  ${spec.id.padEnd(6)} ${physics.padEnd(9)} ${per.toFixed(1).padStart(10)} ` +

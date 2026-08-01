@@ -79,7 +79,20 @@ Consequences to respect:
 
 `src/physics.js` holds three, chosen in OPTIONS: **Arcade** (the original, and
 the default), **Sport** (real grip limits, still cannot spin) and **Pro** (yaw
-dynamics, can genuinely spin). Rivals drive whichever is selected.
+dynamics, no assists of any kind). Rivals drive whichever is selected.
+
+**Pro has `assisted: false`, and that is load-bearing.** No corner braking, no
+lane holding, no automatic overtake, a fixed-ratio steering rack and no
+traction control - the buttons move the front wheels and the tyres decide the
+rest. Two consequences to keep in mind before "fixing" them:
+- A player holding no buttons has nothing keeping it in a lane, so it wanders.
+  That is the definition of no aid, not a defect; `check_steering` measures
+  weaving only on cars that are being driven.
+- **Easy is not a guaranteed win under Pro**, unlike every other model. The
+  aid is what delivered that, and Pro is the one without one. It stays
+  driveable - a car with no steering input still follows the road in track
+  space - but you have to actually drive to win. `simulate.mjs` asserts the
+  win for the aided models and only "not hopeless" for Pro.
 
 `Car.step` keeps everything the rest of the game depends on - integration in
 track space, the `psi` clamp, the rev limiter, track limits, lap counting - and
@@ -102,6 +115,18 @@ is the old code moved verbatim, so its race pacing is unchanged and the
   not a slow way round, it is not a way round. So `driverAid` in `physics.js`
   lifts, brakes and steers on Easy, and the buttons move the lane it holds.
   Normal gets a third of it, Hard none.
+- **A difficulty has two paces, and Hard is the reason.** `aiSpeed`/`aiCorner`
+  are how a rival drives when nobody is racing it; `chaseSpeed`/`chaseCorner`
+  are how it drives with a grudge. Hard cruises at Normal's pace so you can
+  always reel them in and get by, and only shows its real speed once you are
+  ahead - which is what the owner asked for, and better racing than a rival
+  that is simply faster than you everywhere and therefore gone.
+- **`car.baseSpeed` and `car.topSpeed` are different numbers.** The first is
+  what the AI aims at and scales by its grudge; the second is the rev limiter
+  in `Car.step`, which clamps whatever anybody asked for. Setting the limiter
+  from the cruising pace meant a rival with a grudge aimed at 1.12 and was
+  held to 0.95 - the fight-back computed and thrown away one line later.
+  Raising them together instead just makes the whole field faster all race.
 - **Under a grip model the AI's pace comes from `aiCorner`, not `aiSpeed`.**
   Cornering sets lap time, so that is the knob difficulty has to turn - and the
   rubber band has to reach it too (`car.paceScale`), or Easy quietly stops

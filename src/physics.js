@@ -249,15 +249,10 @@ const sport = {
 
 /* ----------------------------------------------------------------- pro -- */
 
-const P_STEER_LOCK = 0.50;            // radians of front wheel angle, parked
-const P_STEER_MIN = 0.018;            // ... and the floor at any speed
-// Fraction of the available grip full lock asks for. Under 1 so that simply
-// holding the wheel over is a stable, fast corner - you have to abuse the
-// throttle to break traction, which is the point of the model.
-const P_LOCK_USE = 0.85;
-// Fraction of the rear tyres' grip the engine is allowed to spend on going
-// forwards, leaving the rest to steer with.
-const P_TRACTION = 0.8;
+// Radians of front wheel angle at full lock. A fixed rack: there is no
+// speed-sensitive reduction and no traction limit anywhere in this model, by
+// design - both are driving aids, and Pro is the one without any.
+const P_STEER_LOCK = 0.50;
 const P_A = 1.46;                     // metres, centre of mass to the front axle
 const P_B = 1.24;                     // ... and to the rear
 const P_IZ = 1.60;                    // yaw inertia over mass, m^2
@@ -294,28 +289,25 @@ const P_SCRUB_FLOOR = 10;             // m/s below which a spin stops costing sp
 const pro = {
   id: 'pro',
   label: 'Pro',
-  blurb: 'Loose rear. You can spin it.',
+  blurb: 'No assists at all. You steer it or you spin it.',
   maxPsi: 2.6,
-  steerRamp: 4.0,
+  // How fast the driver can wind the wheel over, not an assist: a real one
+  // takes about a quarter second to reach full lock, and buttons that snap
+  // from centre to full in a single frame are not a steering wheel.
+  steerRamp: 4.5,
   wallScrub: 0.18,
-  assisted: true,
+  // **Nothing drives this car but you.** No corner braking, no lane holding,
+  // no automatic overtake, and no speed-sensitive rack quietly refusing to
+  // ask the tyres for more than they have. The buttons move the front wheels
+  // and the tyres decide what happens next.
+  assisted: false,
   geared: true,
   yawModel: true,               // psi is a state here, not a command
-  // Gentler and better damped than the models where the heading *is* the
-  // command: here it is a state with inertia, and a high-gain loop around it
-  // resonates into a spin.
+  // The AI still needs a controller - it is a driver, not an assist - and
+  // these are its gains. A high-gain loop around a heading that has inertia
+  // behind it resonates into a spin, so it is gentle and well damped.
   steerGain: 9.0,
   yawDamp: 2.4,
-  crossRate: 6.5,
-  // Needs more of the speed aid than Sport at the same difficulty. Sliding
-  // costs a grip model a little time; it costs this one the back end, so a
-  // player who is over the limit all lap spends it being caught rather than
-  // driving. Hard still passes zero, and zero times anything is zero.
-  aidScale: 2.0,
-  // Chase a lane gently here. A car at the limit is already sliding a couple
-  // of metres a second, and a controller that insists on the exact lane ends
-  // up fighting the slide and rocking the car from side to side down the
-  // straight - which is the weave, seen from the inside.
   laneClose: 0.40,
 
   drive(car, st, dt) {
@@ -328,14 +320,15 @@ const pro = {
     const fade = Math.min(1, car.speed / 6);
     const bank = car.track.slope(st, car.n);
     const grip = gripLimit(v, bank, car.assist);
-    // Speed-sensitive steering, tied to the grip rather than tapered by hand.
-    // Steady state a car turns at v^2 * delta / wheelbase, so the lock that
-    // exactly uses the tyres is grip * L / v^2 - about a degree at racing
-    // speed. A fixed 0.5 rad is nearly twenty degrees at 250 km/h, which is
-    // why Pro was uncontrollable on Hard: every touch of the button was a
-    // request for ten times the grip the car had.
-    const lock = clamp(P_LOCK_USE * grip * (P_A + P_B) / (v * v), P_STEER_MIN, P_STEER_LOCK);
-    const delta = car.steer * lock;
+    // A fixed-ratio rack, like a real car. It used to be tied to the grip -
+    // never asking the tyres for more than they had - which is a driving aid
+    // however it is dressed up, and this model is meant not to have one.
+    //
+    // The consequence is real and intended: full lock at 250 km/h asks for
+    // several times the grip available, the front washes out or the rear
+    // steps round, and it is the driver's job not to do that. Steering is
+    // something you meter here.
+    const delta = car.steer * P_STEER_LOCK;
     car.steerAngle = delta;
 
     // Everything here is outward-positive and *relative to the track*, not to
@@ -362,14 +355,12 @@ const pro = {
     // Longitudinal force, because what it leaves behind is what the tyres have
     // to steer with. Rear-wheel drive, and braking split front-biased.
     //
-    // The drive is capped at what the rear tyres can actually put down. Left
-    // uncapped it asked for the whole rear budget in second gear, leaving
-    // nothing lateral, and the car spun itself off the grid every time with no
-    // steering input at all. A real driver feels that through the seat and
-    // eases off; this is that, and it still leaves plenty of room to hang the
-    // tail out on purpose by adding steering to it.
-    const traction = rearMax * P_TRACTION;
-    const wantDrive = Math.min(car.throttle * S_ENGINE * gearbox(car, dt), S_POWER / v, traction);
+    // No traction control. What the engine asks for is what the rear tyres
+    // have to find, and if that is more than they have, the friction ellipse
+    // below leaves them nothing to steer with and the tail comes round. That
+    // is the model working, not a bug - a rear-drive car with this much power
+    // and a throttle that is either off or wide open behaves exactly so.
+    const wantDrive = Math.min(car.throttle * S_ENGINE * gearbox(car, dt), S_POWER / v);
     const wantStop = car.brake * S_BRAKE;
     const rearLong = wantDrive + wantStop * 0.4;
     const frontLong = wantStop * 0.6;

@@ -24,10 +24,18 @@ const PASS_GAP = 3.4;       // how far beside the car being passed to aim
 // different jobs.
 const FIGHT_RANGE = 25;     // metres; closer than this and a pass is personal
 const FIGHT_FORGET = 60;    // ... and past this they give up and settle down
-const FIGHT_HALFLIFE = 8;   // seconds for the grudge to halve
-const FIGHT_PACE = 0.12;    // extra top speed at full grudge
-const FIGHT_CORNER = 0.06;  // ... and extra corner commitment
-const FIGHT_TOW = 0.05;     // ... and a better tow
+// Seconds for the grudge to halve. Per-difficulty, because how long a rival
+// stays angry is as much of a dial as how fast it goes when it is: a short
+// grudge means they attack, fade, and you cruise away from them.
+const FIGHT_HALFLIFE = 8;
+const FIGHT_TOW = 0.05;     // a better tow while the grudge is up
+
+/** Blend between a difficulty's cruising value and its chasing one. */
+function paced(tuning, cruise, chase, fight) {
+  const a = tuning[cruise] ?? 1;
+  const b = tuning[chase] ?? a;
+  return a + (b - a) * fight;
+}
 
 // Covering the line. One move to take the inside before the challenger
 // commits, held for a couple of seconds, then a cooldown. Never a reaction to
@@ -80,7 +88,7 @@ export class Driver {
       }
     }
 
-    this.fight *= Math.pow(0.5, dt / FIGHT_HALFLIFE);
+    this.fight *= Math.pow(0.5, dt / (tuning.grudge ?? FIGHT_HALFLIFE));
     // Out of reach, so stop chasing. Without this a driver hounds a player who
     // is half a lap up, which is neither realistic nor any fun to be behind.
     if (nearest > FIGHT_FORGET) this.fight = 0;
@@ -203,10 +211,15 @@ export class Driver {
     car.steer = laneSteer(car, target, dt, committed ? COMMITTED_CLOSE : null);
 
     // --- throttle ---------------------------------------------------------
-    // A driver with a grudge finds a little more everywhere, which is what
-    // makes a pass something you then have to defend rather than the end of
-    // the matter.
-    let targetSpeed = car.topSpeed * this.pace * (1 + FIGHT_PACE * this.fight);
+    // Pace is the difficulty's cruising figure until somebody passes this
+    // driver, and its chasing figure for the ten seconds afterwards. On Hard
+    // that is the whole difference between the two settings: you catch them at
+    // Normal's pace, and once you are by they show you what Hard means.
+    //
+    // `baseSpeed` carries the rubber band and nothing else; the pace figure is
+    // applied here so the grudge can move it. `topSpeed` is only the limiter.
+    let targetSpeed = (car.baseSpeed ?? car.topSpeed) * this.pace *
+                      paced(tuning, 'aiSpeed', 'chaseSpeed', this.fight);
 
     // Drafting: tucked in behind someone is worth real speed on a superspeedway.
     if (ahead && aheadGap < DRAFT_RANGE && Math.abs(ahead.n - car.n) < 2.5) {
@@ -227,7 +240,7 @@ export class Driver {
     if (physics) {
       const limit = physics.cornerSpeed(car, st, car.n);
       if (limit < Infinity) {
-        const commitment = (tuning.aiCorner ?? 0.94) * (1 + FIGHT_CORNER * this.fight);
+        const commitment = paced(tuning, 'aiCorner', 'chaseCorner', this.fight);
         targetSpeed = Math.min(targetSpeed, limit * commitment * (car.paceScale ?? 1));
       }
     }
