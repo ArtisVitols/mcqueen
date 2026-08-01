@@ -231,6 +231,36 @@ speed, steers the front pair and leans the body. Nothing re-exports a GLB -
   it is 40% too tall, and `check_ride_height` reported every car 17 cm into the
   road when nothing had moved. Same flag McQueen already needed.
 
+## Two players, two devices
+
+`src/net.js` is the protocol, `src/net/guest.js` the guest's view, and
+`src/net/fake.js` an in-process transport with latency and loss you choose.
+The host runs the real `Race` and owns the result; the guest sends buttons at
+30 Hz and gets snapshots at 20 Hz. Everything talks through `send` /
+`onMessage` / `close` and nothing else, which is what lets the whole stack be
+tested headlessly - see `tools/check_netplay.mjs`.
+
+- **Both devices must lay out the same grid.** `Race.build(playerId, humanIds)`
+  orders the humans by their place in `humanIds`, never by who is local.
+  Sorting the local car to the back reads perfectly naturally and puts a
+  *different* car on the back row of each device: two machines building two
+  different grids, nine metres apart before the lights go out.
+- **The guest predicts its own car and interpolates everyone else.** Snapping
+  every car onto the newest packet shows 20 Hz motion on a 60 Hz screen and
+  puts your own car a round trip behind your thumbs.
+- **The guest must not predict through the countdown.** The host holds the grid
+  still; a guest that runs its own physics anyway has driven most of a lap
+  before the lights go out.
+- **Extrapolation past the newest snapshot is clamped to the corridor.**
+  Running on is what stops a dropped packet freezing the field, but on a lossy
+  link the gaps get long enough to draw a car through the wall.
+- **A round trip of position is not a bug.** The guest applies a button now,
+  the host applies it one latency later, and the snapshot correcting for it is
+  another latency old, so the two versions sit `2 x latency x speed` apart:
+  8 cm in a room, 8.5 m at 300 ms. `check_netplay` measures the sustained
+  offset and the correction peaks separately, because they fail for different
+  reasons and a single number lets one hide the other.
+
 ## The asset pipeline, and the trap in it
 
 `tools/optimize.sh` is the whole pipeline. Run it after changing any model.
@@ -428,6 +458,7 @@ node tools/check_barriers.mjs      # walls inside the corridor, holes under the 
 node tools/check_wheels.mjs        # 4 wheels per car, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
+node tools/check_netplay.mjs       # host and guest agree, at four latencies
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout

@@ -37,7 +37,9 @@ export class Race {
 
     this.field = [];
     this.drivers = [];
-    this.player = null;
+    this.humans = [];                       // every car with a person in it
+    this.player = null;                     // ... the one on this device
+    this.inputs = new Map();                // car -> something with applyTo()
     this.results = [];
     this.state = State.COUNTDOWN;
     this.clock = 0;
@@ -48,12 +50,29 @@ export class Race {
     this.onFinish = null;
   }
 
-  build(playerId) {
+  /**
+   * Lay out the grid.
+   *
+   * @param {string} playerId  the car driven from *this* device - what the
+   *   camera follows and the HUD reports. Always one of `humanIds`.
+   * @param {string[]} humanIds  every car with a person in it. More than one
+   *   in a two-player race; the rest get an AI `Driver`.
+   */
+  build(playerId, humanIds = [playerId]) {
     const { track } = this;
-    // Pole to the player's left-front so the camera opens on a full grid.
+    const humans = new Set(humanIds);
+    // Humans start at the back so the camera opens on a full grid, and so a
+    // parent and a five-year-old line up together rather than a lap apart.
+    //
+    // Their order among themselves comes from `humanIds`, never from who is
+    // local. Sorting the local car to the back seems natural and puts a
+    // *different* car on the back row of each device - two machines laying out
+    // two different grids, nine metres apart before the lights even go out.
     const order = [...this.cars].sort((a, b) => {
-      if (a.spec.id === playerId) return 1;      // player starts at the back
-      if (b.spec.id === playerId) return -1;
+      const ha = humanIds.indexOf(a.spec.id);
+      const hb = humanIds.indexOf(b.spec.id);
+      if ((ha >= 0) !== (hb >= 0)) return ha >= 0 ? 1 : -1;
+      if (ha >= 0) return ha - hb;
       return b.spec.pace - a.spec.pace;
     });
 
@@ -61,11 +80,15 @@ export class Race {
 
     order.forEach((entry, i) => {
       const car = new Car(entry.spec, entry.object, track, this.physics);
-      car.isPlayer = entry.spec.id === playerId;
+      car.isPlayer = humans.has(entry.spec.id);
+      car.isLocal = entry.spec.id === playerId;
       car.totalLaps = this.totalLaps;
       car.topSpeed = 78 * (car.isPlayer ? this.tuning.playerSpeed : this.tuning.aiSpeed);
-      // The grip assist is the player's alone; rivals are paced by aiSpeed.
+      // The grip assist is the humans'; rivals are paced by aiSpeed. Each
+      // human may carry a different one - see `setAssist` - because a parent
+      // and a five-year-old need very different help off the same grid.
       car.assist = car.isPlayer ? (this.tuning.assist ?? 1) : 1;
+      car.lift = car.isPlayer ? (this.tuning.lift ?? 0) : 0;
 
       const row = Math.floor(i / 2);
       // Row 0 sits just behind the line; the pack stretches back from there.
@@ -73,13 +96,32 @@ export class Race {
       car.gridIndex = i;
 
       this.field.push(car);
-      if (car.isPlayer) this.player = car;
+      if (car.isPlayer) this.humans.push(car);
       else this.drivers.push(new Driver(car, entry.spec, this.rng));
+      if (car.isLocal) this.player = car;
     });
 
     this.order = [...this.field];
     this.updateOrder();
     return this;
+  }
+
+  /**
+   * Give one human a different level of help from the other.
+   *
+   * The two of them are racing one field of AI, so the AI's difficulty can
+   * only be one setting - but how much the car drives itself is per person,
+   * and that is the setting that matters when a parent and a five-year-old
+   * share a grid. `assist` is grip, `lift` is how much of `driverAid` applies.
+   *
+   * @param {Car} car
+   * @param {string} level  a key of DIFFICULTY, used only for its aids
+   */
+  setAssist(car, level) {
+    const t = DIFFICULTY[level];
+    if (!t) return;
+    car.assist = t.assist ?? 1;
+    car.lift = t.lift ?? 0;
   }
 
   /**
@@ -140,13 +182,18 @@ export class Race {
   }
 
   fixedStep(dt, input) {
-    const player = this.player;
-
-    if (!player.finished) {
-      input.applyTo(player, dt, this.physics);
-      driverAid(player, this.tuning.lift ?? 0, dt, this.field);
-    } else {
-      this.coolDown(player, dt);
+    for (const car of this.humans) {
+      if (car.finished) {
+        this.coolDown(car, dt);
+        continue;
+      }
+      // The local player's input comes in as an argument so single-player
+      // needs no wiring at all; anyone else's arrives over the wire and is
+      // registered in `inputs`.
+      const source = car === this.player ? input : this.inputs.get(car);
+      if (!source) continue;              // a guest who has not sent anything yet
+      source.applyTo(car, dt, this.physics);
+      driverAid(car, car.lift ?? 0, dt, this.field);
     }
 
     for (const driver of this.drivers) {
@@ -159,21 +206,21 @@ export class Race {
       this.rubberBand(car);
     }
 
-    // The AI gets its tow through its own target speed; the player has no such
+    // The AI gets its tow through its own target speed; a human has no such
     // controller, so the models that model drag need to be told about it here.
-    this.updateDraft(player);
+    for (const car of this.humans) this.updateDraft(car);
 
     for (const car of this.field) {
       const before = car.lap;
       car.step(dt);
-      if (car.lap !== before && car.lap > 1 && car === player) {
+      if (car.lap !== before && car.lap > 1 && car === this.player) {
         this.onLap?.(car.lap);
       }
       if (!car.finished && car.progress >= this.totalLaps * this.track.lapLength) {
         car.finished = true;
         car.finishTime = this.clock;
         this.results.push(car);
-        if (car === player || this.results.length === this.field.length) {
+        if (car === this.player || this.results.length === this.field.length) {
           this.onFinish?.(this.results.length, car);
         }
       }
@@ -210,7 +257,16 @@ export class Race {
   rubberBand(car) {
     const band = this.tuning.band;
     if (!band) { car.paceScale = 1; return; }
-    const gap = this.player.progress - car.progress;   // negative: AI ahead
+    // Measured against whichever human is nearest, which is the same thing as
+    // "the player" when there is only one of them. Picking the leader instead
+    // would hand the slower of two humans a field that has already been reeled
+    // in for somebody else.
+    let gap = 0;                                       // negative: AI ahead
+    let near = Infinity;
+    for (const human of this.humans) {
+      const d = human.progress - car.progress;
+      if (Math.abs(d) < near) { near = Math.abs(d); gap = d; }
+    }
     const norm = THREE.MathUtils.clamp(gap / 260, -1, 1);
     // Asymmetric on purpose: an AI that has escaped gets reeled in hard, but
     // one that is behind only gets a small tow. Falling behind should be

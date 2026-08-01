@@ -40,7 +40,7 @@ class FlatOut {
 export const TRACKS = read('assets/tracks.json').tracks;
 
 export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3,
-                           physics = 'arcade',
+                           physics = 'arcade', partnerId = null,
                            playerId = 'lightning_mcqueen', steerNoise = 0 } = {}) {
   const spec = TRACKS.find((t) => t.id === trackId) || TRACKS[0];
   const track = new Track(read(`assets/${spec.data}`));
@@ -49,8 +49,18 @@ export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3
   const entries = specs.map((carSpec) => ({ spec: carSpec, object: new THREE.Object3D() }));
   // gridLanes has to come through, or the sim races a grid the game never uses
   // and quietly misses cars starting outside the corridor.
+  // A second human, when asked for, is the two-player grid: no Driver, driven
+  // by its own scripted input exactly as a guest's would be over the wire.
+  const humans = partnerId ? [playerId, partnerId] : [playerId];
   const race = new Race(track, entries, { difficulty, laps, physics, car: playerId },
-                        spec.gridLanes).build(playerId);
+                        spec.gridLanes).build(playerId, humans);
+  if (partnerId) {
+    const partner = race.humans.find((c) => c.spec.id === partnerId);
+    // The other person is a worse driver who saws at the buttons - which also
+    // means the two humans do not move in lockstep and actually interact.
+    race.inputs.set(partner, new FlatOut(0.4));
+    race.setAssist(partner, 'easy');
+  }
 
   const input = new FlatOut(steerNoise);
   const stats = {
@@ -104,7 +114,8 @@ export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3
     prevOrder = order;
   }
 
-  return { race, track, stats, seconds: t, laps, difficulty, physics, lapCrossings, spec };
+  return { race, track, stats, seconds: t, laps, difficulty, physics, lapCrossings, spec,
+           partnerId };
 }
 
 function report(run) {
@@ -113,7 +124,7 @@ function report(run) {
   const lapTime = seconds / laps;
 
   console.log(`\n=== ${spec.short} / ${PHYSICS[physics].label} / ${difficulty.toUpperCase()}` +
-              `  ${laps} lap(s) ===`);
+              `  ${laps} lap(s)${run.partnerId ? ' / two players' : ''} ===`);
   console.log(`race time      ${seconds.toFixed(1)} s   (~${lapTime.toFixed(1)} s/lap)`);
   console.log(`lap length     ${track.lapLength.toFixed(0)} m`);
   console.log(`speeds         ${(stats.minSpeed * 3.6).toFixed(0)} - ${(stats.maxSpeed * 3.6).toFixed(0)} km/h`);
@@ -175,6 +186,23 @@ if (!isMain) {
       }
     }
   }
+  // The two-player grid, once per circuit. It shares every code path with the
+  // single-player race, so what this is really checking is that seating a
+  // second human does not break lap counting, the corridor or the finish.
+  console.log('\n=== two players on the same grid ===');
+  for (const spec of TRACKS) {
+    const run = simulate({ trackId: spec.id, difficulty: 'normal', laps: 3,
+                           physics: 'arcade', partnerId: 'chick_hicks' });
+    const problems = report(run);
+    if (problems.length) {
+      failed++;
+      console.log('PROBLEMS:');
+      for (const p of problems) console.log('  ! ' + p);
+    } else {
+      console.log('OK');
+    }
+  }
+
   console.log('\n=== player position, holding the throttle flat ===');
   for (const [k, p] of Object.entries(placings)) console.log(`  ${k.padEnd(24)} P${p}`);
   // A five-year-old can tap any entry in the menu, so Easy has to be winnable
