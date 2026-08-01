@@ -107,6 +107,25 @@ export class Race {
   }
 
   /**
+   * Hand a human's car over to the AI.
+   *
+   * Used when the other phone drops out. The alternative is a car that either
+   * holds its last buttons - pinned at full throttle for the rest of the race -
+   * or releases them and parks on the racing line. Neither is acceptable, and
+   * a rival that simply carries on racing is barely noticeable.
+   */
+  abandon(car) {
+    if (!car || !car.isPlayer) return;
+    car.isPlayer = false;
+    this.humans = this.humans.filter((c) => c !== car);
+    this.inputs.delete(car);
+    car.assist = 1;
+    car.lift = 0;
+    car.topSpeed = 78 * this.tuning.aiSpeed;
+    this.drivers.push(new Driver(car, car.spec, this.rng));
+  }
+
+  /**
    * Give one human a different level of help from the other.
    *
    * The two of them are racing one field of AI, so the AI's difficulty can

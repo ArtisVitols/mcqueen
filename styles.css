@@ -209,11 +209,45 @@ button.big.ghost {
   opacity: 0.55;
   min-height: 1.1em;
 }
-/* On the shortest phones the panel is full to the millimetre, and the pill
-   labels say enough on their own. Losing a line of prose beats losing BACK
-   off the bottom of the screen. */
+/* Two-player screen. The room code is read out loud across a room, so it is
+   the biggest thing on the panel. */
+.two-lead { margin: 0; font-size: clamp(11px, 2vh, 14px); opacity: 0.75; text-align: center; }
+.code {
+  font-size: clamp(34px, 9vh, 64px);
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;                /* letter-spacing pads the right only */
+  color: #ffd66b;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.code-input {
+  width: 100%;
+  max-width: 260px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: clamp(26px, 6vh, 40px);
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-align: center;
+  text-transform: uppercase;
+  color: #ffd66b;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+}
+#two .panel { gap: 0.7vh; }
+#two .hint { text-align: center; min-height: 1.2em; }
+
+/* On the shortest phones the options panel is full to the millimetre, and the
+   handling pills say enough on their own. Losing a line of prose beats losing
+   BACK off the bottom of the screen.
+   Scoped to #options on purpose: the same class carries "waiting for the other
+   player" and every connection error on the two-player screen, and hiding
+   those leaves somebody staring at a dead panel. */
 @media (max-height: 400px) {
-  .hint { display: none; }
+  #options .hint { display: none; }
 }
 .pill {
   padding: 5px 11px;

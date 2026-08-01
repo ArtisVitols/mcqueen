@@ -20,6 +20,21 @@ Open it on a phone, turn the phone sideways, tap START.
 - The wheels turn at road speed, the front pair steers, and the body leans into
   the corners and noses down under braking.
 
+## Two players
+
+**2 PLAYERS** on the menu. One of you taps HOST and reads out the four-letter
+code; the other taps JOIN and types it. You then race each other *and* the five
+AI cars on the usual grid, from anywhere - it goes phone to phone over WebRTC,
+using a free public broker only to introduce the two devices.
+
+The host picks the circuit, the laps, the handling and how hard the AI is.
+Each of you picks your own **help** separately, which is the point: a
+five-year-old can have the car lifting and steering for them while you have
+none, in the same race.
+
+If the other phone drops out, their car is taken over by the AI and the race
+carries on.
+
 ## Handling
 
 Three models, switchable in OPTIONS and mid-race from the pause menu. Everyone

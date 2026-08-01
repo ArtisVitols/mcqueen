@@ -7,9 +7,15 @@ import { Audio } from './audio.js';
 import { loadCar, loadTrack, disposeTrack, assetUrl } from './models.js';
 import * as Settings from './settings.js';
 import { QUALITY, DIFFICULTY, LAP_CHOICES } from './settings.js';
-import { PHYSICS } from './physics.js';
+import { PHYSICS, driverAid } from './physics.js';
+import { MSG, RemoteInput, packButtons, snapshot, SNAPSHOT_HZ, INPUT_HZ } from './net.js';
+import { GuestView } from './net/guest.js';
 
 const dom = (id) => document.getElementById(id);
+
+// Seconds of silence before the other phone counts as gone. Long enough to
+// ride out a lift tunnel, short enough that nobody races a ghost.
+const DROP_AFTER = 5;
 
 class Game {
   constructor() {
@@ -22,6 +28,7 @@ class Game {
     this.models = new Map();
     this.race = null;
     this.raf = 0;
+    this.net = null;              // {role, link, view, remote, ...} when two up
 
     this.camPos = new THREE.Vector3();
     this.camAim = new THREE.Vector3();
@@ -181,6 +188,7 @@ class Game {
 
   buildMenu() {
     dom('btn-start').onclick = () => this.startRace();
+    dom('btn-two').onclick = () => this.showTwoPlayer();
     dom('btn-options').onclick = () => this.showOptions();
     dom('btn-back').onclick = () => {
       Settings.save(this.settings);
@@ -189,7 +197,10 @@ class Game {
       this.setIdleCar(this.settings.car);
     };
     dom('btn-menu').onclick = () => this.toMenu();
-    dom('btn-again').onclick = () => this.startRace();
+    // RACE AGAIN is single-player only: restarting a two-player race needs
+    // both phones to agree, and a button that silently drops the other person
+    // is worse than one that is not there.
+    dom('btn-again').onclick = () => { this.endNet(); this.startRace(); };
     dom('btn-pause').onclick = () => this.pauseRace();
     dom('btn-resume').onclick = () => this.resumeRace();
     dom('btn-restart').onclick = () => {
@@ -201,6 +212,7 @@ class Game {
       this.toMenu();
     };
 
+    this.buildTwoPlayer();
     this.buildCarPicker();
     this.buildTrackPicker();
     this.buildToggles();
@@ -339,6 +351,174 @@ class Game {
     dom('physics-blurb').textContent = (PHYSICS[this.settings.physics] || PHYSICS.arcade).blurb;
   }
 
+  // ------------------------------------------------------------ two players
+
+  /**
+   * Which transport to use.
+   *
+   * `?net=loopback` swaps WebRTC for a BroadcastChannel between two tabs, so
+   * the whole multiplayer path - menus, connection, race, render - can be
+   * tested on one machine without depending on somebody else's free broker
+   * being up. See tools/check_twoplayer.mjs.
+   */
+  netModule() {
+    const mode = new URLSearchParams(location.search).get('net');
+    return mode === 'loopback' ? import('./net/loopback.js') : import('./net/peer.js');
+  }
+
+  buildTwoPlayer() {
+    const show = (which) => {
+      dom('two-pick').classList.toggle('hidden', which !== null);
+      dom('two-host').classList.toggle('hidden', which !== 'host');
+      dom('two-join').classList.toggle('hidden', which !== 'join');
+    };
+
+    dom('btn-two-back').onclick = () => {
+      this.net?.session?.cancel?.();
+      this.net = null;
+      dom('two').classList.add('hidden');
+      dom('menu').classList.remove('hidden');
+    };
+    dom('btn-host').onclick = () => { show('host'); this.hostRace(); };
+    dom('btn-join').onclick = () => show('join');
+    dom('btn-connect').onclick = () => this.joinRace(dom('join-code').value.trim().toUpperCase());
+    dom('join-code').oninput = (e) => {
+      e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    };
+
+    // Each player's own level of help. The AI's difficulty is the host's, but
+    // how much the car drives itself is personal - which is the whole point
+    // when a parent and a five-year-old share a grid.
+    const el = dom('opt-help');
+    const labels = { easy: 'Lots', normal: 'Some', hard: 'None' };
+    el.innerHTML = '';
+    for (const key of Object.keys(DIFFICULTY)) {
+      const b = document.createElement('button');
+      b.className = 'pill';
+      b.textContent = labels[key] || DIFFICULTY[key].label;
+      b.classList.toggle('sel', key === (this.settings.help || 'easy'));
+      b.onclick = () => {
+        this.settings.help = key;
+        Settings.save(this.settings);
+        for (const c of el.children) c.classList.remove('sel');
+        b.classList.add('sel');
+      };
+      el.appendChild(b);
+    }
+  }
+
+  showTwoPlayer() {
+    dom('menu').classList.add('hidden');
+    dom('two').classList.remove('hidden');
+    dom('two-pick').classList.remove('hidden');
+    dom('two-host').classList.add('hidden');
+    dom('two-join').classList.add('hidden');
+    dom('room-code').textContent = '----';
+    dom('host-status').textContent = '';
+    dom('join-status').textContent = '';
+  }
+
+  async hostRace() {
+    const status = dom('host-status');
+    try {
+      const net = await this.netModule();
+      const session = await net.host((s) => { status.textContent = `${s}…`; });
+      this.net = { role: 'host', session };
+      dom('room-code').textContent = session.code;
+      status.textContent = 'Waiting for the other player…';
+
+      const link = await session.waitForGuest;
+      this.net.link = link;
+      status.textContent = 'Connected. Starting…';
+
+      link.onMessage((msg) => {
+        if (!this.net) return;
+        this.net.lastHeard = performance.now() / 1000;
+        if (msg.t === MSG.HELLO) this.beginHosted(link, msg);
+        else if (msg.t === MSG.INPUT) this.net.remote?.receive(msg.b, msg.q);
+      });
+      link.onClose = () => this.guestLeft();
+    } catch (err) {
+      status.textContent = `${err.message}. Try again, or race on your own.`;
+      this.net = null;
+    }
+  }
+
+  async joinRace(code) {
+    const status = dom('join-status');
+    if (!code || code.length < 4) { status.textContent = 'Four letters, please.'; return; }
+    try {
+      const net = await this.netModule();
+      status.textContent = 'Connecting…';
+      const link = await net.join(code, (s) => { status.textContent = `${s}…`; });
+      this.net = { role: 'guest', link };
+      status.textContent = 'Connected. Waiting for the host…';
+
+      link.onMessage((msg) => {
+        if (!this.net) return;
+        this.net.lastHeard = performance.now() / 1000;
+        if (msg.t === MSG.START) this.beginJoined(link, msg);
+        else if (msg.t === MSG.SNAP) this.net.view?.receive(msg, performance.now() / 1000);
+      });
+      link.onClose = () => this.hostLeft();
+      link.send({ t: MSG.HELLO, car: this.settings.car, help: this.settings.help || 'easy' });
+    } catch (err) {
+      status.textContent = `${err.message}.`;
+      this.net = null;
+    }
+  }
+
+  /** Host: the guest has said hello, so pick cars and start everybody. */
+  beginHosted(link, hello) {
+    const hostCar = this.settings.car;
+    // Two people cannot drive the same car. The guest asked for one; if it is
+    // taken they get the first that is not.
+    let guestCar = hello.car;
+    if (guestCar === hostCar || !this.carSpecs.some((c) => c.id === guestCar)) {
+      guestCar = this.carSpecs.find((c) => c.id !== hostCar).id;
+    }
+    const start = {
+      t: MSG.START,
+      track: this.settings.track,
+      laps: this.settings.laps,
+      physics: this.settings.physics,
+      difficulty: this.settings.difficulty,
+      quality: this.settings.quality,
+      hostCar,
+      guestCar,
+      guestHelp: hello.help || 'easy',
+    };
+    link.send(start);
+    this.net.start = start;
+    this.net.remote = new RemoteInput();
+    this.startRace(start);
+  }
+
+  /** Guest: the host has sent the grid, so match it and go. */
+  async beginJoined(link, start) {
+    this.net.start = start;
+    if (start.track !== this.settings.track) {
+      dom('join-status').textContent = `Loading ${start.track}…`;
+      await this.loadTrackById(start.track);
+    }
+    this.startRace(start);
+  }
+
+  guestLeft() {
+    if (!this.net || this.net.role !== 'host') return;
+    const car = this.race?.humans.find((c) => c.spec.id === this.net.start?.guestCar);
+    this.race?.abandon(car);
+    this.net.link?.close?.();
+    this.net = null;                  // the rest of the race is single-player
+  }
+
+  hostLeft() {
+    if (!this.net || this.net.role !== 'guest') return;
+    this.net = null;
+    this.toMenu();
+    dom('menu-track').textContent = 'The other player left the race';
+  }
+
   applyQuality() {
     const q = QUALITY[this.settings.quality];
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, q.pixelRatio));
@@ -405,9 +585,18 @@ class Game {
     this.loop(this._last);
   }
 
+  /** Drop any multiplayer session - on quitting, restarting or finishing. */
+  endNet() {
+    if (!this.net) return;
+    this.net.session?.cancel?.();
+    this.net.link?.close?.();
+    this.net = null;
+  }
+
   toMenu() {
     cancelAnimationFrame(this.raf);
     this.paused = false;
+    this.endNet();
     this.race = null;
     this.audio.silenceEngines();
     dom('result').classList.add('hidden');
@@ -416,6 +605,7 @@ class Game {
     dom('btn-back').classList.remove('hidden');
     dom('hud').classList.add('hidden');
     dom('controls').classList.add('hidden');
+    dom('two').classList.add('hidden');
     dom('menu').classList.remove('hidden');
     this.hud.hideLights();
     this.startIdleCamera();
@@ -478,9 +668,15 @@ class Game {
 
   // ------------------------------------------------------------------ race
 
-  async startRace() {
+  /**
+   * @param {object} [start] the host's MSG.START in a two-player race. It is
+   *   the single source of truth for the grid: both devices must build the
+   *   same one, so nothing here may come from local settings.
+   */
+  async startRace(start = null) {
     cancelAnimationFrame(this.raf);
     this.paused = false;
+    dom('two').classList.add('hidden');
     dom('menu').classList.add('hidden');
     dom('options').classList.add('hidden');
     dom('pause-actions').classList.add('hidden');
@@ -502,10 +698,42 @@ class Game {
       object: this.models.get(spec.id).object,
     }));
 
-    const race = new Race(this.track, entries, this.settings,
-      this.trackSpec().gridLanes).build(this.settings.car);
+    let race;
+    if (start) {
+      // Everything about the grid comes off the wire, in a fixed order, so the
+      // two devices lay out the same cars in the same slots.
+      const humans = [start.hostCar, start.guestCar];
+      const mine = this.net.role === 'host' ? start.hostCar : start.guestCar;
+      race = new Race(this.track, entries, {
+        difficulty: start.difficulty, laps: start.laps,
+        physics: start.physics, car: mine,
+      }, this.trackSpec().gridLanes).build(mine, humans);
+
+      const hostCar = race.humans.find((c) => c.spec.id === start.hostCar);
+      const guestCar = race.humans.find((c) => c.spec.id === start.guestCar);
+      race.setAssist(hostCar, this.net.role === 'host'
+        ? (this.settings.help || 'easy') : (start.hostHelp || 'easy'));
+      race.setAssist(guestCar, this.net.role === 'host'
+        ? start.guestHelp : (this.settings.help || 'easy'));
+
+      if (this.net.role === 'host') {
+        race.inputs.set(guestCar, this.net.remote);
+        this.net.sinceSnap = 0;
+      } else {
+        // The guest runs no AI and no race logic of its own - it predicts its
+        // own car and is told about everything else.
+        race.driverAidFor = (car, dt) => driverAid(car, car.lift ?? 0, dt, race.field);
+        this.net.view = new GuestView(race);
+        this.net.sinceInput = 0;
+        this.net.seq = 0;
+      }
+      this.hud.setLaps(start.laps);
+    } else {
+      race = new Race(this.track, entries, this.settings,
+        this.trackSpec().gridLanes).build(this.settings.car);
+      this.hud.setLaps(this.settings.laps);
+    }
     this.race = race;
-    this.hud.setLaps(this.settings.laps);
     this.hud.setField(race.field.length);
     this.hud.setLights(0, false);
     this.hud.update(race.player, this.settings.laps);
@@ -565,7 +793,58 @@ class Game {
     const race = this.race;
     if (!race) return;
 
-    race.update(dt, this.input);
+    const net = this.net;
+    // Silence is the only reliable sign the other phone has gone. A closed tab
+    // fires nothing at all, and a phone that goes to sleep mid-race fires it
+    // far too late - so both ends watch the clock rather than trusting the
+    // transport to tell them.
+    if (net && net.lastHeard && now / 1000 - net.lastHeard > DROP_AFTER) {
+      if (net.role === 'host') this.guestLeft(); else this.hostLeft();
+      return;
+    }
+
+    if (!net) {
+      race.update(dt, this.input);
+    } else if (net.role === 'host') {
+      // The host runs the real race and tells the other phone about it.
+      race.update(dt, this.input);
+      net.sinceSnap += dt;
+      if (net.sinceSnap >= 1 / SNAPSHOT_HZ) {
+        net.sinceSnap = 0;
+        net.link?.send(snapshot(race));
+      }
+    } else {
+      // The guest predicts its own car, is told about everyone else, and sends
+      // nothing but which buttons are down.
+      net.view.update(dt, this.input, now / 1000);
+      net.sinceInput += dt;
+      if (net.sinceInput >= 1 / INPUT_HZ) {
+        net.sinceInput = 0;
+        net.link?.send({ t: MSG.INPUT, b: packButtons(this.input.state), q: net.seq++ });
+      }
+      // The lights are the host's to run, so mirror whatever the last snapshot
+      // said rather than counting down locally. Watch the *state* as well as
+      // the count: the fifth bulb lights while the race is still counting
+      // down, so keying only on the count means green never arrives and the
+      // gantry stays lit over a car doing 210 km/h.
+      if (race.lights !== net.lastLights || race.state !== net.lastState) {
+        const go = race.state === State.RACING && net.lastState !== State.RACING;
+        net.lastLights = race.lights;
+        net.lastState = race.state;
+        if (race.state === State.COUNTDOWN) {
+          this.hud.setLights(Math.min(race.lights, 5), false);
+          this.audio.beep(false);
+        } else if (go) {
+          this.hud.setLights(5, true);
+          this.audio.beep(true);
+          setTimeout(() => this.hud.hideLights(), 900);
+        }
+      }
+      if (race.player.finished && !net.shown) {
+        net.shown = true;
+        this.showResult(race.player);
+      }
+    }
 
     for (const car of race.field) car.model.userData.wheels?.update(car, dt);
 

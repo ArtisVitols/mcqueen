@@ -8,13 +8,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>McQueen Speedway</title>
-<link rel="stylesheet" href="styles.css?v=20260801-1326-4a1f8da">
+<link rel="stylesheet" href="styles.css?v=20260801-1418-c06b754">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>">
 <!-- Stamped by tools/stamp_version.py on every deploy. GitHub Pages serves
      everything with max-age=600, so without this a phone can hold a new
      track-data.json alongside the previous track.glb for ten minutes - which
      is exactly how you end up with cars floating over a flattened road. -->
-<script>window.__BUILD__ = '20260801-1326-4a1f8da';</script>
+<script>window.__BUILD__ = '20260801-1418-c06b754';</script>
 <script type="importmap">
 {
   "imports": {
@@ -42,6 +42,7 @@
      at <b id="menu-track">Motor Speedway of the South</b></p>
   <div class="menu-buttons">
     <button id="btn-start" class="big">START</button>
+    <button id="btn-two" class="big ghost">2 PLAYERS</button>
     <button id="btn-options" class="big ghost">OPTIONS</button>
   </div>
   <!-- So "am I actually on the new version?" is answerable at a glance. -->
@@ -81,6 +82,40 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- two players ----------------------------------------------------------- -->
+<div id="two" class="screen hidden">
+  <div class="panel">
+    <h2>Two Players</h2>
+    <p class="two-lead">One of you hosts and reads out the code.<br>
+       The other joins with it. You race each other and the AI together.</p>
+
+    <div id="two-pick" class="menu-buttons row">
+      <button id="btn-host" class="big">HOST A RACE</button>
+      <button id="btn-join" class="big ghost">JOIN A RACE</button>
+    </div>
+
+    <div id="two-host" class="hidden">
+      <label class="row-label">Read this out</label>
+      <div id="room-code" class="code">----</div>
+      <p id="host-status" class="hint">Reaching the lobby…</p>
+    </div>
+
+    <div id="two-join" class="hidden">
+      <label class="row-label">Type their code</label>
+      <input id="join-code" class="code-input" maxlength="4" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" placeholder="ABCD">
+      <button id="btn-connect" class="big">CONNECT</button>
+      <p id="join-status" class="hint"></p>
+    </div>
+
+    <label class="row-label">How much help do you want?</label>
+    <div id="opt-help" class="pills"></div>
+    <p class="hint">Each of you picks your own. The AI difficulty is the host's.</p>
+
+    <button id="btn-two-back" class="big ghost">BACK</button>
   </div>
 </div>
 
@@ -143,6 +178,6 @@
   </div>
 </div>
 
-<script type="module" src="src/main.js?v=20260801-1326-4a1f8da"></script>
+<script type="module" src="src/main.js?v=20260801-1418-c06b754"></script>
 </body>
 </html>

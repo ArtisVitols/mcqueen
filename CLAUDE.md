@@ -233,8 +233,15 @@ speed, steers the front pair and leans the body. Nothing re-exports a GLB -
 
 ## Two players, two devices
 
-`src/net.js` is the protocol, `src/net/guest.js` the guest's view, and
-`src/net/fake.js` an in-process transport with latency and loss you choose.
+**2 PLAYERS** on the main menu; START is still single-player and unchanged.
+One phone hosts and shows a four-letter code, the other types it in, and they
+race each other plus five AI on the usual grid.
+
+`src/net.js` is the protocol, `src/net/guest.js` the guest's view, and there
+are three transports behind one `send` / `onMessage` / `close` interface:
+`peer.js` (WebRTC through PeerJS's free broker), `loopback.js`
+(BroadcastChannel between two tabs, reached with `?net=loopback`) and
+`fake.js` (in-process, with latency and loss you choose).
 The host runs the real `Race` and owns the result; the guest sends buttons at
 30 Hz and gets snapshots at 20 Hz. Everything talks through `send` /
 `onMessage` / `close` and nothing else, which is what lets the whole stack be
@@ -254,6 +261,29 @@ tested headlessly - see `tools/check_netplay.mjs`.
 - **Extrapolation past the newest snapshot is clamped to the corridor.**
   Running on is what stops a dropped packet freezing the field, but on a lossy
   link the gaps get long enough to draw a car through the wall.
+- **PeerJS is vendored as the UMD build, and loaded on demand.** `bundler.mjs`
+  has bare imports only a bundler can resolve; the UMD file is self-contained
+  and sets `window.Peer`. It is injected as a `<script>` the first time
+  somebody chooses multiplayer, so a single-player session never downloads the
+  93 KB.
+- **Silence is the only reliable sign the other phone has gone.** A closed tab
+  fires no event at all and a sleeping phone fires one far too late, so both
+  ends watch a clock (`DROP_AFTER`) instead of trusting the transport. The
+  host hands the missing car to an AI (`Race.abandon`); the guest goes back to
+  the menu.
+- **The guest mirrors the start lights off the snapshot, and has to watch the
+  race *state*, not just the bulb count.** The fifth bulb lights while the
+  countdown is still running, so keying on the count alone means green never
+  arrives and the gantry stays lit over a car doing 210 km/h.
+- **Everything about the grid comes off the wire.** Circuit, laps, handling and
+  AI difficulty are the host's, sent in one message; only the *assist* level is
+  each player's own, which is the setting that matters when a parent and a
+  five-year-old share a grid. Nothing in `startRace` may read local settings
+  when a `start` message is present.
+- **`.hint` carries connection status as well as the options blurb.** The
+  short-screen rule that hides it is scoped to `#options` for that reason -
+  unscoped, the host sees a dead panel instead of "waiting for the other
+  player" or an error.
 - **A round trip of position is not a bug.** The guest applies a button now,
   the host applies it one latency later, and the snapshot correcting for it is
   another latency old, so the two versions sit `2 x latency x speed` apart:
@@ -459,6 +489,7 @@ node tools/check_wheels.mjs        # 4 wheels per car, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
 node tools/check_netplay.mjs       # host and guest agree, at four latencies
+node tools/check_twoplayer.mjs     # two real tabs through the real menus
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout

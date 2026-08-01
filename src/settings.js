@@ -7,6 +7,9 @@ const DEFAULTS = {
   quality: 'high',
   difficulty: 'easy',
   physics: 'arcade',
+  // How much the car drives itself in a two-player race. Each player keeps
+  // their own; the AI's difficulty belongs to whoever is hosting.
+  help: 'easy',
   sound: true,
   volume: 0.8,
 };
