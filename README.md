@@ -38,7 +38,7 @@ and the gear shows under the speed.
 
 | Track | Lap | Notes |
 |---|---|---|
-| Motor Speedway of the South | 1455 m | The Piston Cup stadium from the first film |
+| Motor Speedway of the South | 2381 m | The Piston Cup stadium from the first film |
 | Palm Mile Speedway | 1507 m | Short oval, infield lake, beach behind the stands |
 | Yoyleland Speedway | 2817 m | Big banked superspeedway, 18° in the turns |
 
@@ -134,6 +134,7 @@ node  tools/trace_lap.mjs msots sport   # why a lap was slow, half-second by hal
 node  tools/verify_track.mjs       # shipped tracks vs physics data - run this!
 node  tools/check_ride_height.mjs  # gap between each car and the road
 node  tools/check_wheels.mjs       # four wheels per car, and proof they turn
+node  tools/check_steering.mjs     # does it steer, and does the field weave?
 node  tools/shots.mjs              # drive the real game in headless Chrome
 node  tools/shots_tracks.mjs       # ... on every circuit
 ```

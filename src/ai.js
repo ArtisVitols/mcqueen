@@ -1,4 +1,4 @@
-import { MAX_PSI } from './car.js';
+import { laneSteer } from './physics.js';
 
 /**
  * Opponent driver logic.
@@ -14,6 +14,7 @@ const LOOK_AHEAD = 42;      // metres of track scanned for traffic
 const SIDE_CLEAR = 3.6;     // lateral gap that counts as "occupied"
 const DRAFT_RANGE = 34;
 const CAR_LENGTH = 5;
+const PASS_GAP = 3.4;       // how far beside the car being passed to aim
 
 export class Driver {
   constructor(car, spec, rng) {
@@ -24,6 +25,7 @@ export class Driver {
     this.aggression = spec.aggression;
     this.rng = rng;
     this.commit = 0;          // seconds left on the current overtake
+    this.cool = 0;            // ... and before another may be started
     this.wander = rng() * Math.PI * 2;
   }
 
@@ -66,42 +68,43 @@ export class Driver {
 
     // --- choose a lane ----------------------------------------------------
     this.commit = Math.max(0, this.commit - dt);
-    let want = idle;
+    this.cool = Math.max(0, this.cool - dt);
 
-    if (ahead && this.commit <= 0 && aheadGap < 30) {
+    if (ahead && this.commit <= 0 && this.cool <= 0 && aheadGap < 30) {
+      // Only pull out for someone you are actually catching. Diving on a car
+      // going the same speed just means sitting alongside it and coming back.
       const closing = car.speed - ahead.speed;
       const keen = this.aggression * tuning.aggression;
-      if (closing > -1.5 && this.rng() < keen * dt * 4) {
-        // Prefer the inside - it is the shorter way round - then the outside.
-        if (!blockedInside) {
-          want = car.n - 4.5;
-          this.commit = 2.4;
-        } else if (!blockedOutside) {
-          want = car.n + 4.5;
-          this.commit = 2.4;
-        }
-        this.lane = want;
+      if (closing > 0.5 && this.rng() < keen * dt * 2) {
+        // Aim beside the car being passed, not a fixed distance from wherever
+        // this car happens to be - repeating the latter walks the car across
+        // the track a lane at a time.
+        if (!blockedInside) this.lane = ahead.n - PASS_GAP;
+        else if (!blockedOutside) this.lane = ahead.n + PASS_GAP;
+        this.commit = 3.0;
       }
-    } else if (this.commit > 0) {
+    }
+    let want;
+    if (this.commit > 0) {
+      want = this.lane;
+    } else {
+      // Drift back to the preferred line, then wait before trying again. The
+      // cooldown is the difference between racing and weaving: without it a
+      // car dives, returns over about two seconds, and immediately dives
+      // again, which is exactly the four-second wave the whole field was
+      // doing down Palm Mile's straights.
+      if (this.lane !== idle && Math.abs(this.lane - idle) > 0.05 && this.cool <= 0) {
+        this.cool = 2.5 + this.rng() * 2.5;
+      }
+      this.lane += (idle - this.lane) * Math.min(1, dt * 0.6);
       want = this.lane;
     }
 
-    // Once past, drift back to the preferred line.
-    if (this.commit <= 0) this.lane += (idle - this.lane) * Math.min(1, dt * 0.5);
-
+    // Keep off the very edge: the corridor already reserves half a car, and a
+    // driver aiming at the last centimetre of it spends the lap on the clamp.
     const st = track.sample(car.s, car.st);
     const target = clamp(want, track.limit(st, -1) + 1.5, track.limit(st, 1) - 1.5);
-
-    // --- steer towards the target lane ------------------------------------
-    // Aim for a heading that closes the gap over roughly a second, then let
-    // the car's own steering model get there.
-    const wantPsi = clamp(Math.atan2(target - car.n, Math.max(12, car.speed)), -MAX_PSI, MAX_PSI);
-    // Straight proportional control works when the heading *is* the command.
-    // Where the heading is a state with inertia behind it, the same gain
-    // oscillates and then spins the car, so damp on the yaw rate instead.
-    car.steer = physics?.yawModel
-      ? clamp((wantPsi - car.psi) * 1.5 - (car.yawRate || 0) * 1.1, -1, 1)
-      : clamp((wantPsi - car.psi) * 2.6, -1, 1);
+    car.steer = laneSteer(car, target, dt);
 
     // --- throttle ---------------------------------------------------------
     let targetSpeed = car.topSpeed * this.pace;
@@ -134,10 +137,12 @@ export class Driver {
     car.brake = clamp(-err * 0.12, 0, 1);
 
     // Feeding in more power while the tail is already out just finishes the
-    // job. Nobody wins a race spinning, so the AI backs off the moment it
-    // feels the rear go.
+    // job, so the AI backs off when it feels the rear go. Keyed on how fast
+    // the car is *rotating*, not on how far it is sliding: at the limit every
+    // car slides a few metres a second, and reading that as trouble had the
+    // whole field creeping round the lap on a sixth of a throttle.
     if (physics?.yawModel) {
-      car.throttle *= Math.max(0.15, 1 - Math.abs(car.vy) / 4);
+      car.throttle *= Math.max(0.4, 1 - Math.abs(car.yawRate || 0) * 0.9);
     }
   }
 }

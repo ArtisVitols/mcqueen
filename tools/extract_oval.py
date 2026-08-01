@@ -31,14 +31,24 @@ RAYS = 1440
 HARMONICS = 12
 SHAPE_HARMONICS = 48   # low-pass for the centreline itself, after snapping
 STATIONS = 1200
-TARGET_WIDTH = 18.0     # metres; every circuit is scaled to race like a superspeedway
+# Metres. The model has no real-world scale, so this is what sets it: the
+# circuit is blown up until its racing surface is this wide. Per-track,
+# because it is only meaningful relative to what the mask actually covers -
+# Motor Speedway's mask is the racing surface alone, with the pit lane
+# excluded, so scaling *that* to 18 m would make the lap 3.3 km.
+TARGET_WIDTH = 18.0
 
 TRACKS = {
     'msots': {
         'name': 'Motor Speedway of the South',
-        # A narrow 0.8 m ribbon at model scale, between the wall (Material.076)
-        # and the infield grass (Material.099).
-        'road': ['Material.105', 'Material.107'],
+        # 105 is the racing surface. Material.107 is deliberately excluded:
+        # going outward from the infield the order is 100 (pit boxes), 107
+        # (pit lane), 108 (the pit wall), then 105 - so including 107 put the
+        # centreline on the wrong side of the wall and ran the entire field
+        # down the pit lane for a release. 107 continues round the rest of the
+        # lap as the inner apron, which is why it looks like road.
+        'road': ['Material.105'],
+        'targetWidth': 13.0,        # the road really is this wide; see above
         'startBearing': -90.0,      # start/finish on the pit straight
     },
     'palm': {
@@ -302,7 +312,8 @@ def main():
 
     band = sorted(outer[i] - inner[i] for i in range(RAYS))
     model_width = band[RAYS // 2] * mpp
-    scale = TARGET_WIDTH / model_width
+    target = cfg.get('targetWidth', TARGET_WIDTH)
+    scale = target / model_width
     print(f'  ribbon {model_width:.2f} m wide at model scale -> scale x{scale:.2f}')
     print(f'  lap {lap_px * mpp:.1f} m -> {lap_px * mpp * scale:.0f} m scaled')
 
@@ -349,8 +360,8 @@ def main():
         for s, v in zip(stations, fourier_smooth([s[key] for s in stations], HARMONICS)):
             s[key] = v
     for s in stations:
-        s['outW'] = min(TARGET_WIDTH * 0.7, max(4.5, s['outW']))
-        s['inW'] = min(TARGET_WIDTH * 0.7, max(4.5, s['inW']))
+        s['outW'] = min(target * 0.7, max(4.5, s['outW']))
+        s['inW'] = min(target * 0.7, max(4.5, s['inW']))
 
     # NASCAR runs anticlockwise: infield on the driver's left puts the outward
     # normal on their right, so (t x o).y must be negative with Y up.

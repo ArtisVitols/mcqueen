@@ -95,10 +95,13 @@ export class Input {
     const ramp = physics?.steerRamp || 0;
     if (ramp > 0 && dt > 0) {
       const step = ramp * dt * (want === 0 ? 1.8 : 1);   // let go faster than you turn
-      car.steer += Math.max(-step, Math.min(step, want - car.steer));
+      car.steerCmd += Math.max(-step, Math.min(step, want - car.steerCmd));
     } else {
-      car.steer = want;
+      car.steerCmd = want;
     }
+    // Under a model with a driver aid the command is a lane request and the
+    // aid works out the lock; otherwise it goes straight to the tyres.
+    if (!physics?.assisted) car.steer = car.steerCmd;
     car.throttle = s.gas ? 1 : 0;
     car.brake = s.brake ? 1 : 0;
   }

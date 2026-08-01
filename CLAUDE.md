@@ -114,6 +114,63 @@ is the old code moved verbatim, so its race pacing is unchanged and the
   speed. Pro floors the reference speed and fades the tyres in, or the cars sit
   on the grid sawing sideways with the friction circle leaving nothing to drive
   with, and no race ever finishes.
+- **Pro's yaw dynamics are written in track yaw, not world yaw.** In world yaw
+  a car with no steering input carries straight on while the road turns away,
+  the slip angles run away, both axles saturate - and at that point the
+  restoring moment is *zero*, because a balanced car has `a·Wf = b·Wr` - so it
+  spins on the spot for the rest of the lap. In track yaw a car left alone
+  follows the road exactly as it does under Arcade, and the tyre forces are
+  what let it deviate. The corner is still paid for through `vy`.
+- **The engine is power-limited (`S_POWER / v`) and traction-limited
+  (`P_TRACTION` of the rear grip).** Neither is decoration. A flat force figure
+  is a full g at 200 km/h, and under Pro that comes straight out of the rear
+  tyres through the friction ellipse: it left them a third of their grip and
+  the car spun off the grid with no input at all.
+- **`P_ALIGN` is what makes Pro driveable.** Self-aligning torque pulls the car
+  round to point where it is actually travelling. Without it, moderate slip is
+  divergent - the car keeps rotating after the driver lets go, which is exactly
+  what "chaotic" feels like. It does not stop you spinning it; it stops the
+  spin being unrecoverable.
+- **A spun car must be able to drive away.** Below about 10 m/s the tyres have
+  faded out and cannot straighten the car themselves, so the recovery net has a
+  floor under its unwinding rate and stops scrubbing speed once the car is
+  slow. Without both, three cars once sat spinning for a 900-second race.
+- **Anything a controller feeds is not allowed a discontinuity.** Sport's
+  self-centring used to switch on below `|steer| < 0.05`; a closed-loop
+  controller settles *exactly* there and chatters across it, and that half-metre
+  limit cycle cost the player 15% of top speed on Yoyleland. Fade, do not
+  switch. For the same reason `psiDot` in the friction circle is low-passed: a
+  raw per-step difference of a thousandth of a radian reads as 0.6 rad/s, which
+  at racing speed is 40 m/s^2 of cornering load that is not there.
+
+## Steering, and why it is one function
+
+Every car - AI, player, all three models - steers through `laneSteer` /
+`rateSteer` in `physics.js`. That is deliberate: the same two bugs kept
+appearing at both ends.
+
+- **Gain.** At 70 m/s, crossing the track at 4 m/s is 0.06 rad of heading. A
+  proportional gain of 1.5 on that asks for 9% of full lock, which is why Sport
+  and Pro appeared to have no steering at all on every difficulty except Hard.
+- **Damping.** A proportional term on lateral error alone is an undamped
+  second-order system, because the heading lags the command. That is what had
+  the whole field weaving across Palm Mile's straights in waves. The error
+  becomes a *bounded closing rate*, and the damping is on the yaw rate.
+- **The slide.** A car at the limit is sliding metres a second, and a
+  controller that ignores `vy` holds a fine line all through a corner and then
+  slams to full lock the moment the corner ends.
+- **The driver's command is its own field.** `car.steerCmd` is what the buttons
+  ask for; `car.steer` is what the tyres get. Ramping the input on top of the
+  aid's own output fed the controller back on itself and the car stopped
+  responding to the buttons entirely.
+- **The aid must not swallow the steering.** Pressing left means "go left", at
+  a rate the driver can feel - the same thing Arcade does. Only letting go
+  means "hold this lane". Blending the player's command away with the
+  assistance level is what made steering work on Hard and nowhere else.
+- **On Easy the aid also overtakes.** Holding the throttle down has to be
+  enough to win, and it is not if the car spends the race nose to tail behind
+  someone slower; the field runs in a queue and a player who never touches the
+  buttons joins the back of it.
 
 ## Wheels
 
@@ -204,10 +261,23 @@ entry is correct; a car floating over the gap is not.
   `alphaMode: BLEND` and alpha 0, a banked shell floating above the road. Any
   raycast or height extraction must skip fully transparent meshes or it locks
   onto the shell instead of the asphalt.
-- **Pit lanes share the road's material.** Palm Mile's `Material.219` is the
-  pit lane, immediately inside the asphalt. Including it in the road mask
-  dragged the centreline sideways and ran the whole field under the pit
-  awnings. Check a race screenshot, not just the numbers.
+- **Pit lanes share the road's material, and they run the whole lap.** Palm
+  Mile's `Material.219` and Motor Speedway's `Material.107` are pit lanes;
+  including either in the road mask drags the centreline onto the wrong side
+  of the pit wall and races the entire field down the pit lane. Neither is
+  findable by asking "does this cover the whole ring?" - a pit lane continues
+  round the rest of the lap as the inner apron, in the same material. What
+  identifies it is the *radial order*: at Motor Speedway, outward from the
+  infield, it goes `Material.100` (pit boxes) → `107` (pit lane) → `108` (the
+  wall) → `105` (the racing surface). The one outboard of the wall is the road.
+  Check a race screenshot, not just the numbers.
+- **`TARGET_WIDTH` is what sets a circuit's scale**, so narrowing the road mask
+  makes the whole track bigger. Dropping the pit lane from Motor Speedway's
+  mask took its lap from 1455 m to 3297 m, because the ribbon it scales to 18 m
+  was suddenly a third narrower. `targetWidth` is per-track for that reason;
+  Motor Speedway's 13 m is the width the racing surface really is, and gives a
+  2381 m lap. Setting it above what `refine_track`'s `MAX_HALF` allows just
+  throws road away.
 - **McQueen is the only skinned car.** `Box3.setFromObject(obj)` measures his
   bind pose; you need the `precise` flag (`setFromObject(obj, true)`), which
   applies bone transforms. Same for measuring vertices by hand — use
@@ -262,6 +332,9 @@ entry is correct; a car floating over the gap is not.
 - **`refine_track.mjs` is not idempotent.** It reads the file it writes, so
   running it twice compounds the width trimming. Always run `extract_oval.py`
   first.
+- **Contact between cars is charged per second, not per step.** `separate()`
+  runs at 120 Hz; unscaled, its speed penalty took 14 m/s off a car in half a
+  second of light touching, so brushing a rival read as a crash.
 - **The grid is laid out in track space**, so it lands wherever the racing
   line's lateral offsets put it. Motor Speedway's start straight is the pit
   straight: the racing surface there runs roughly `n = -6.8 .. +0.8`, with the
@@ -322,6 +395,7 @@ node tools/lap_tour.mjs <track>    # chase cam all the way round a lap
 node tools/check_grid.mjs          # what surface each starting slot sits on
 node tools/check_barriers.mjs      # walls inside the corridor, holes under the car
 node tools/check_wheels.mjs        # 4 wheels per car, and proof they turn
+node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout
@@ -342,7 +416,8 @@ Hicks shipped backwards.
 What "good" looks like right now:
 
 - `simulate.mjs all` — 27 OK, i.e. every handling model x circuit x difficulty.
-  Easy is P1 on all nine combinations and Hard beats a throttle-pinned player.
+  Easy is P1 on all nine combinations. Hard beats a throttle-pinned player on
+  eight of nine; Pro on Motor Speedway is the exception and wants a look.
   If Easy stops being a win, that is a regression regardless of what else
   improved. Worst heading seen anywhere is 81° with every car still finishing;
   the run asserts nothing exceeds 172°, which is where `maxPsi` would be
@@ -350,6 +425,11 @@ What "good" looks like right now:
 - `check_wheels.mjs` — four wheels on all seven cars, each turning 90° for a
   quarter turn, all the same way. It checks numerically *and* renders, because
   a tyre is nearly symmetric and a spinning one photographs as a still one.
+- `check_steering.mjs` — every model at every difficulty moves the car at
+  1.5 m/s or more across the road at full lock and settles when released, and
+  the field weaves less than six times a lap **on the straights**. Counting
+  swings everywhere instead flags a car running wide through a corner and
+  coming back, which is what it is supposed to do.
 - `verify_track.mjs` — median height error 3 mm / 3 mm / 34 mm, and under
   0.2% of points past 0.5 m on all three. The **median** is the signal that
   catches systemic drift.

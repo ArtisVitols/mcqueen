@@ -145,6 +145,13 @@ function gearbox(car, dt) {
 /* --------------------------------------------------------------- sport -- */
 
 const S_ENGINE = 11.0;                // multiplied by the gear ratio
+// Power, as acceleration x speed. An engine is power-limited once it is
+// moving, so its push falls away as 1/v; a flat figure had the car pulling a
+// full g at 200 km/h. Under Pro that mattered enormously, because the drive
+// force comes straight out of the rear tyres' lateral budget through the
+// friction ellipse - it left them 30% of their grip and the car spun out of
+// every corner it was asked to take flat.
+const S_POWER = 430;
 const S_BRAKE = 26.0;
 const S_DRAG = 0.00055;
 const S_ROLL_DRAG = 0.6;
@@ -170,6 +177,7 @@ const sport = {
   wallScrub: 0.30,
   assisted: true,               // the driver aids apply under this model
   geared: true,
+  crossRate: 7.5,               // m/s across the track at full lock
 
   drive(car, st, dt) {
     const v = Math.max(car.speed, 0.001);
@@ -183,15 +191,27 @@ const sport = {
     const transfer = 1 + 0.28 * car.brake - 0.18 * car.throttle;
     const authority = Math.min(1, v / 10) * (0.5 + 0.5 * (1 - Math.min(1, v / 130)));
     car.psi += car.steer * S_STEER_RATE * authority * transfer * dt;
-    if (Math.abs(car.steer) < 0.05) {
-      car.psi -= car.psi * Math.min(1, S_STEER_RETURN * dt);
-    }
+    // Self-centring, faded out as the driver asks for more lock rather than
+    // switched on below a threshold. A hard threshold is fine for a car driven
+    // by two buttons, but a closed-loop controller settles *exactly* on it and
+    // chatters across it - which cost the player 15% of top speed on
+    // Yoyleland in a half-metre limit cycle nobody could see.
+    const hands = Math.max(0, 1 - Math.abs(car.steer) * 8);
+    car.psi -= car.psi * Math.min(1, S_STEER_RETURN * dt) * hands;
 
     // --- the friction circle ---------------------------------------------
     // Outward-positive centrifugal demand. Rotating the heading outwards at
     // `psiDot` unwinds part of the track's own curvature, which is why a car
     // that turns out of the corner needs less grip, not more.
-    const psiDot = (car.psi - (car.psiPrev ?? car.psi)) / dt;
+    //
+    // Filtered, because a raw per-step difference is not a rate: a controller
+    // trimming the heading by a thousandth of a radian each step reads as
+    // 0.6 rad/s, which at racing speed is 40 m/s^2 of imaginary cornering
+    // load. That ate the whole friction circle and pinned the car at 65 m/s
+    // on a track it should have been flat out on.
+    const raw = (car.psi - (car.psiPrev ?? car.psi)) / dt;
+    car.psiRate = (car.psiRate ?? 0) + (raw - (car.psiRate ?? 0)) * Math.min(1, dt / 0.12);
+    const psiDot = car.psiRate;
     car.psiPrev = car.psi;
     const demand = v * v * st.kappa - v * psiDot;
     const shortfall = Math.abs(demand) - grip;
@@ -210,7 +230,7 @@ const sport = {
     // therefore genuinely less effective, and weaving down a straight costs
     // acceleration.
     const longMax = Math.sqrt(Math.max(0, grip * grip - used * used));
-    const drive = Math.min(car.throttle * S_ENGINE * gearbox(car, dt), longMax);
+    const drive = Math.min(car.throttle * S_ENGINE * gearbox(car, dt), S_POWER / v, longMax);
     const stop = Math.min(car.brake * S_BRAKE, longMax);
     const drag = S_DRAG * v * v * (1 - 0.22 * (car.draft || 0)) + S_ROLL_DRAG;
     // Induced drag: the work going sideways comes out of the car's momentum,
@@ -229,16 +249,34 @@ const sport = {
 
 /* ----------------------------------------------------------------- pro -- */
 
-const P_STEER_LOCK = 0.50;            // radians of front wheel angle at full lock
+const P_STEER_LOCK = 0.50;            // radians of front wheel angle, parked
+const P_STEER_MIN = 0.018;            // ... and the floor at any speed
+// Fraction of the available grip full lock asks for. Under 1 so that simply
+// holding the wheel over is a stable, fast corner - you have to abuse the
+// throttle to break traction, which is the point of the model.
+const P_LOCK_USE = 0.85;
+// Fraction of the rear tyres' grip the engine is allowed to spend on going
+// forwards, leaving the rest to steer with.
+const P_TRACTION = 0.8;
 const P_A = 1.46;                     // metres, centre of mass to the front axle
 const P_B = 1.24;                     // ... and to the rear
 const P_IZ = 1.60;                    // yaw inertia over mass, m^2
+// Static weight on each axle, which follows from where the mass sits: the
+// axle further from the centre of mass carries less. Not a free parameter.
+const P_FRONT_SHARE = P_B / (P_A + P_B);
 // Cornering stiffness per unit mass, m/s^2 per radian of slip. Sized so the
 // tyres saturate around a tenth of a radian, which is where real ones give up.
 const P_CS_FRONT = 180;
 const P_CS_REAR = 210;                // rear stiffer than front: stable at heart
+const P_YAW_MAX = 1.4;                // rad/s; past this the car is already lost
+// Self-aligning torque: the front wheels' castor pulls the car round to point
+// where it is actually travelling. Small in a normal corner, and the reason a
+// real car walks itself out of a slide instead of needing to be caught
+// perfectly - which is what makes this model driveable rather than a trap.
+const P_ALIGN = 9.0;
 const P_V_REF = 8;                    // slip angles are meaningless below this
-const P_RECOVER_PSI = 1.40;           // ~80 degrees, where the safety net starts
+const P_RECOVER_PSI = 1.05;           // ~80 degrees, where the safety net starts
+const P_SCRUB_FLOOR = 10;             // m/s below which a spin stops costing speed
 
 /**
  * Yaw dynamics: the rear can step out, and you have to catch it.
@@ -263,6 +301,22 @@ const pro = {
   assisted: true,
   geared: true,
   yawModel: true,               // psi is a state here, not a command
+  // Gentler and better damped than the models where the heading *is* the
+  // command: here it is a state with inertia, and a high-gain loop around it
+  // resonates into a spin.
+  steerGain: 9.0,
+  yawDamp: 2.4,
+  crossRate: 6.5,
+  // Needs more of the speed aid than Sport at the same difficulty. Sliding
+  // costs a grip model a little time; it costs this one the back end, so a
+  // player who is over the limit all lap spends it being caught rather than
+  // driving. Hard still passes zero, and zero times anything is zero.
+  aidScale: 2.0,
+  // Chase a lane gently here. A car at the limit is already sliding a couple
+  // of metres a second, and a controller that insists on the exact lane ends
+  // up fighting the slide and rocking the car from side to side down the
+  // straight - which is the weave, seen from the inside.
+  laneClose: 0.40,
 
   drive(car, st, dt) {
     const v = Math.max(car.speed, 0.001);
@@ -274,46 +328,87 @@ const pro = {
     const fade = Math.min(1, car.speed / 6);
     const bank = car.track.slope(st, car.n);
     const grip = gripLimit(v, bank, car.assist);
-    const delta = car.steer * P_STEER_LOCK * (1 - 0.45 * Math.min(1, v / 90));
+    // Speed-sensitive steering, tied to the grip rather than tapered by hand.
+    // Steady state a car turns at v^2 * delta / wheelbase, so the lock that
+    // exactly uses the tyres is grip * L / v^2 - about a degree at racing
+    // speed. A fixed 0.5 rad is nearly twenty degrees at 250 km/h, which is
+    // why Pro was uncontrollable on Hard: every touch of the button was a
+    // request for ten times the grip the car had.
+    const lock = clamp(P_LOCK_USE * grip * (P_A + P_B) / (v * v), P_STEER_MIN, P_STEER_LOCK);
+    const delta = car.steer * lock;
     car.steerAngle = delta;
 
-    // Everything here is outward-positive. The track tangent itself rotates
-    // inward at kappa*v, so the car's yaw rate in the world is psiDot - kappa*v
-    // - which is what makes a car that simply holds its heading follow the
-    // corner.
+    // Everything here is outward-positive and *relative to the track*, not to
+    // the world. That is the whole difference between a model that can be
+    // driven and one that cannot: written in world yaw, a car with no steering
+    // input carries straight on while the road turns away, so the slip angles
+    // run away, both axles saturate - at which point the restoring moment is
+    // zero, because a balanced car has a*Wf = b*Wr - and it spins on the spot
+    // for the rest of the lap. In track yaw a car left alone simply follows
+    // the road, exactly as it does under Arcade, and the tyre forces are what
+    // let it deviate: turn in, run wide, or step the rear out under power.
     const r = car.yawRate || 0;
-    const rWorld = r - st.kappa * v;
+    const slipF = delta - (car.vy + P_A * r) / vRef;
+    const slipR = -(car.vy - P_B * r) / vRef;
 
-    const slipF = delta - (car.vy + P_A * rWorld) / vRef;
-    const slipR = -(car.vy - P_B * rWorld) / vRef;
+    // Each axle only has the grip its share of the weight gives it, and only
+    // what the friction ellipse leaves after the longitudinal load. Scaling
+    // the rear budget by the *throttle pedal* instead - as this did - made the
+    // car permanently oversteer at 250 km/h, where the engine can barely push
+    // at all, and that is what made Pro chaotic to drive.
+    const rearMax = grip * (1 - P_FRONT_SHARE);
+    const frontMax = grip * P_FRONT_SHARE;
 
-    // Power and braking eat the rear's lateral budget. This one line is the
-    // whole reason the tail steps out when you get greedy with the throttle.
-    const rearBudget = grip * Math.max(0.3, 1 - 0.5 * car.throttle - 0.25 * car.brake);
-    const frontBudget = grip * (1 + 0.25 * car.brake);
+    // Longitudinal force, because what it leaves behind is what the tyres have
+    // to steer with. Rear-wheel drive, and braking split front-biased.
+    //
+    // The drive is capped at what the rear tyres can actually put down. Left
+    // uncapped it asked for the whole rear budget in second gear, leaving
+    // nothing lateral, and the car spun itself off the grid every time with no
+    // steering input at all. A real driver feels that through the seat and
+    // eases off; this is that, and it still leaves plenty of room to hang the
+    // tail out on purpose by adding steering to it.
+    const traction = rearMax * P_TRACTION;
+    const wantDrive = Math.min(car.throttle * S_ENGINE * gearbox(car, dt), S_POWER / v, traction);
+    const wantStop = car.brake * S_BRAKE;
+    const rearLong = wantDrive + wantStop * 0.4;
+    const frontLong = wantStop * 0.6;
+    const rearBudget = Math.sqrt(Math.max(0, rearMax * rearMax - rearLong * rearLong));
+    const frontBudget = Math.sqrt(Math.max(0, frontMax * frontMax - frontLong * frontLong));
+
     const fF = clamp(P_CS_FRONT * slipF, -frontBudget, frontBudget) * fade;
     const fR = clamp(P_CS_REAR * slipR, -rearBudget, rearBudget) * fade;
 
-    car.vy += ((fF + fR) - v * rWorld) * dt;
-    car.yawRate = (r + (P_A * fF - P_B * fR) / P_IZ * dt) * Math.pow(0.55, dt);
+    // The corner still has to be paid for: this is the same outward demand
+    // Sport uses, less whatever the car unwinds by rotating out of the turn.
+    // Exceed what the tyres can hold and the difference becomes a slide.
+    car.vy += (fF + fR + v * v * st.kappa - v * r) * dt;
+    const align = P_ALIGN * Math.atan2(car.vy, v);
+    car.yawRate = clamp((r + ((P_A * fF - P_B * fR) / P_IZ + align) * dt) * Math.pow(0.25, dt),
+                        -P_YAW_MAX, P_YAW_MAX);
     car.psi += car.yawRate * dt;
 
     // The safety net. Not decoration: without it a spun car sits there and the
     // race never finishes - and the AI drives this model too.
     if (Math.abs(car.psi) > P_RECOVER_PSI) {
       const over = Math.abs(car.psi) - P_RECOVER_PSI;
-      car.psi -= Math.sign(car.psi) * Math.min(Math.abs(car.psi), over * 3.5 * dt);
+      // A floor under the unwinding rate, and no scrubbing once the car is
+      // slow. Proportional-only recovery stalls at the threshold, and below
+      // walking pace the tyres have faded out and cannot straighten the car
+      // themselves - so a spun car sat there losing the last of its speed
+      // forever, and three of them failed to finish a race.
+      car.psi -= Math.sign(car.psi) * Math.min(Math.abs(car.psi), (over * 3.5 + 0.9) * dt);
       car.yawRate *= Math.pow(0.02, dt);
       car.vy *= Math.pow(0.05, dt);
-      car.speed *= Math.pow(0.25, dt);
+      if (car.speed > P_SCRUB_FLOOR) car.speed *= Math.pow(0.25, dt);
     }
 
     const used = Math.min(grip, Math.abs(fF + fR));
     car.slip = Math.min(1, Math.abs(car.vy) / 4 + Math.abs(slipR) * 3);
 
     const longMax = Math.sqrt(Math.max(0, grip * grip - used * used));
-    const drive = Math.min(car.throttle * S_ENGINE * gearbox(car, dt), longMax);
-    const stop = Math.min(car.brake * S_BRAKE, longMax);
+    const drive = Math.min(wantDrive, longMax);
+    const stop = Math.min(wantStop, longMax);
     const drag = S_DRAG * v * v * (1 - 0.22 * (car.draft || 0)) + S_ROLL_DRAG;
     const slideDrag = used * Math.abs(car.vy) / v;
 
@@ -321,24 +416,83 @@ const pro = {
   },
 
   cornerSpeed(car, st, n) {
-    // Rivals leave more in hand here, because a Pro-model AI that runs right on
-    // the limit spins itself out of the race.
-    return cornerSpeedAt(car, st, n) * 0.94;
+    // No extra margin: this used to hold rivals back because a Pro-model AI
+    // that ran near the limit spun itself out of the race, and with the
+    // self-aligning torque in place it no longer does. Difficulty sets the
+    // margin now, through `aiCorner`.
+    return cornerSpeedAt(car, st, n);
   },
 };
 
+/* ------------------------------------------------------- lane following -- */
+
+const LANE_CLOSE = 0.85;              // 1/s a lane error is closed at
+const LANE_RATE_MAX = 5.0;            // m/s of sideways movement the AI will ask for
+const STEER_GAIN = 16.0;              // steer per radian of heading error
+const YAW_DAMP = 1.1;                 // ... per rad/s of yaw rate, where there is one
+const STEER_SLEW = 6.0;               // how fast the commanded lock may change, 1/s
+
+/**
+ * Steering input that makes the car cross the track at `rate` metres a second.
+ *
+ * Everything that steers a car here goes through this, because the gain is the
+ * part that is easy to get wrong: at 70 m/s, crossing at 4 m/s is only 0.06 rad
+ * of heading, so a gain of 1.5 asks for 9% of full lock and the car appears not
+ * to steer at all. That is exactly what Sport and Pro did on every difficulty
+ * except Hard.
+ */
+function rateSteer(car, rate, dt = 0) {
+  const p = car.physics;
+  const v = Math.max(8, car.speed);
+  // The car crosses the track at v*sin(psi) *plus* whatever it is sliding, and
+  // at the limit that slide is metres a second. A controller that ignores it
+  // holds a fine line all through a corner and then slams to full lock the
+  // moment the corner ends and the slide has nothing left to balance it.
+  const need = rate - (car.vy || 0);
+  const wantPsi = clamp(Math.asin(clamp(need / v, -0.6, 0.6)), -p.maxPsi, p.maxPsi);
+  const damp = p.yawModel ? (car.yawRate || 0) * (p.yawDamp ?? YAW_DAMP) : 0;
+  const want = clamp((wantPsi - car.psi) * (p.steerGain ?? STEER_GAIN) - damp, -1, 1);
+  // Slew-limit the lock where the heading has inertia behind it. A controller
+  // that can slam from full left to full right in one 8 ms step will always
+  // find a way to resonate with the yaw, and what that looks like on screen is
+  // a car steering chaotically for no reason the driver can see.
+  if (!p.yawModel || !(dt > 0)) return want;
+  const step = STEER_SLEW * dt;
+  return clamp(car.steer + clamp(want - car.steer, -step, step), -1, 1);
+}
+
+/**
+ * Steering input that takes a car to lane `target` and keeps it there.
+ *
+ * A proportional term on lateral error alone is an undamped second-order
+ * system: the heading lags the command, so the car overshoots, comes back and
+ * hunts. That is what had the whole field weaving across Palm Mile's straights
+ * in waves with a one to five second period. Turning the error into a
+ * *bounded closing rate* makes a big lane change a steady sweep rather than a
+ * lunge, and the damping in rateSteer is on the yaw rate, which is the state
+ * that actually carries the overshoot.
+ */
+export function laneSteer(car, target, dt = 0) {
+  const close = car.physics.laneClose ?? LANE_CLOSE;
+  return rateSteer(car, clamp((target - car.n) * close, -LANE_RATE_MAX, LANE_RATE_MAX), dt);
+}
+
 /* ----------------------------------------------------------- driver aid -- */
 
-const AID_BRAKE = 22.0;                // m/s^2 the aid plans its braking at
+const AID_BRAKE = 22.0;               // m/s^2 the aid plans its braking at
 const AID_LOOK = [0, 22, 48, 78, 112];
-const AID_LANE_RATE = 3.2;            // m/s the steering moves the target lane
+const AID_CROSS_RATE = 7.5;           // m/s across the track at full lock, by default
+const AID_EDGE = 1.0;                 // stop steering this far from the edge
+const AID_TRAFFIC = 40;               // metres ahead the aid looks for traffic
+const AID_PASS = 3.2;                 // ... and how far beside it to aim
+const AID_PASS_CLOSE = 2.2;           // 1/s; brisker than simply holding a lane
 
 /**
  * Lifts, brakes and steers for the player.
  *
  * "Easy must be winnable by holding the throttle down and nothing else" is a
  * rule of this project, and a five-year-old can tap any entry in the physics
- * menu. Neither of the grip models can honour that on its own:
+ * menu. Neither grip model can honour that on its own:
  *
  *  - Sport arrives at a 63 m corner doing 280, slides to the wall and scrubs
  *    there for half the turn.
@@ -347,48 +501,89 @@ const AID_LANE_RATE = 3.2;            // m/s the steering moves the target lane
  *    it simply understeers off. Holding the throttle is not a slow way round;
  *    it is not a way round.
  *
- * So Easy drives. The steering buttons still do something - they move the lane
- * the aid holds, which is how the arcade model already feels - and the aid
- * handles the rest. Normal gives a third of it, Hard none. Arcade has no grip
- * model to assist and is skipped entirely.
+ * So the aid drives the corner speed. What it must *not* do is drive the
+ * steering: holding a lane the buttons only nudged made the car feel like it
+ * had no steering at all on anything but Hard, which is precisely how it was
+ * reported. Pressing left here means "go left", at a rate the driver can feel,
+ * exactly as the arcade model behaves; letting go means "hold this lane".
  *
- * @param {number} amount 0..1, how much of the aid to apply
+ * @param {number} amount 0..1, how much of the speed aid to apply
  */
-export function driverAid(car, amount, dt) {
-  if (!(amount > 0) || !car.physics.assisted) return;
+export function driverAid(car, amount, dt, field = null) {
+  if (!car.physics.assisted) return;
   const st = car._aidSt || (car._aidSt = {});
+  amount = Math.min(1, amount * (car.physics.aidScale ?? 1));
 
-  // --- slow down for what is coming -------------------------------------
-  let allowed = Infinity;
-  for (const ahead of AID_LOOK) {
-    car.track.sample(car.s + ahead, st);
-    const limit = car.physics.cornerSpeed(car, st, car.n);
-    if (!(limit < Infinity)) continue;
-    // Fastest we may be going now and still be down to `limit` by then.
-    allowed = Math.min(allowed, Math.sqrt(limit * limit + 2 * AID_BRAKE * ahead));
-  }
-  const err = allowed - car.speed;
-  if (err < 0) {
-    // The same gains the AI uses on its own target speed, so a player being
-    // driven keeps pace with one driving properly. An aid that is merely safe
-    // is not enough - it has to be quick, or Easy is a guaranteed loss.
-    car.throttle = Math.min(car.throttle, Math.max(0, 1 + err * 0.5 * amount));
-    car.brake = Math.max(car.brake, Math.min(1, -err * 0.12 * amount));
+  if (amount > 0) {
+    let allowed = Infinity;
+    for (const ahead of AID_LOOK) {
+      car.track.sample(car.s + ahead, st);
+      const limit = car.physics.cornerSpeed(car, st, car.n);
+      if (!(limit < Infinity)) continue;
+      // Fastest we may be going now and still be down to `limit` by then.
+      allowed = Math.min(allowed, Math.sqrt(limit * limit + 2 * AID_BRAKE * ahead));
+    }
+    const err = allowed - car.speed;
+    if (err < 0) {
+      // The same gains the AI uses on its own target speed, so a player being
+      // driven keeps pace with one driving properly. An aid that is merely
+      // safe is not enough - it has to be quick, or Easy is a guaranteed loss.
+      car.throttle = Math.min(car.throttle, Math.max(0, 1 + err * 0.5 * amount));
+      car.brake = Math.max(car.brake, Math.min(1, -err * 0.12 * amount));
+    }
   }
 
-  // --- hold a lane -------------------------------------------------------
+  const want = car.steerCmd;
   car.track.sample(car.s, st);
-  const lo = car.track.limit(st, -1) + 1.0;
-  const hi = car.track.limit(st, 1) - 1.0;
-  const want = car.steer;
-  if (car.aidLane === undefined) car.aidLane = car.n;
-  car.aidLane = clamp(car.aidLane + want * AID_LANE_RATE * dt, lo, hi);
+  const lo = car.track.limit(st, -1);
+  const hi = car.track.limit(st, 1);
 
-  const wantPsi = clamp(Math.atan2(car.aidLane - car.n, Math.max(12, car.speed)), -0.5, 0.5);
-  // Damped on the yaw rate, because under Pro the heading has inertia behind
-  // it and a plain proportional term oscillates until it spins.
-  const auto = clamp((wantPsi - car.psi) * 1.5 - (car.yawRate || 0) * 1.1, -1, 1);
-  car.steer = want * (1 - amount) + auto * amount;
+  if (Math.abs(want) > 0.02) {
+    // Steering. Give the driver a crossing rate, and stop feeding it in once
+    // they have run out of road on that side.
+    let rate = want * (car.physics.crossRate ?? AID_CROSS_RATE);
+    if (rate > 0) rate *= clamp((hi - AID_EDGE - car.n) / 1.5, 0, 1);
+    else rate *= clamp((car.n - lo - AID_EDGE) / 1.5, 0, 1);
+    car.aidLane = car.n;              // wherever they leave it becomes the lane
+    car.steer = rateSteer(car, rate, dt);
+  } else {
+    if (car.aidLane === undefined) car.aidLane = car.n;
+    // Pull out for traffic. Holding the throttle down has to be enough to win
+    // on Easy, and it is not if the car spends the race nose to tail behind
+    // someone slower - the field on a superspeedway runs in a queue, and a
+    // player who never touches the buttons simply joins the back of it.
+    const block = field && amount > 0 ? blockedBy(car, field) : null;
+    if (block) {
+      // Aim beside them, on whichever side there is more room, and get there
+      // at a pace that actually completes the pass: easing across at the
+      // lane-holding rate takes three seconds, by which time the corner has
+      // arrived and the move is abandoned.
+      const inside = clamp(block.n - AID_PASS, lo + AID_EDGE, hi - AID_EDGE);
+      const outside = clamp(block.n + AID_PASS, lo + AID_EDGE, hi - AID_EDGE);
+      const pick = Math.abs(inside - block.n) > Math.abs(outside - block.n) ? inside : outside;
+      car.aidLane = pick;
+    }
+    car.aidLane = clamp(car.aidLane, Math.min(lo, hi) + AID_EDGE, Math.max(lo, hi) - AID_EDGE);
+    const close = block ? AID_PASS_CLOSE : (car.physics.laneClose ?? 0.85);
+    const cross = car.physics.crossRate ?? AID_CROSS_RATE;
+    car.steer = rateSteer(car, clamp((car.aidLane - car.n) * close, -cross, cross), dt);
+  }
+}
+
+/** The car directly ahead and in the way, if this car is catching it. */
+function blockedBy(car, field) {
+  let best = null;
+  let gap = AID_TRAFFIC;
+  for (const other of field) {
+    if (other === car || other.finished) continue;
+    const d = car.track.delta(car.s, other.s);
+    if (d <= 2 || d >= gap) continue;
+    if (Math.abs(other.n - car.n) > 2.6) continue;
+    if (other.speed > car.speed - 0.5) continue;      // not actually catching it
+    gap = d;
+    best = other;
+  }
+  return best;
 }
 
 export const PHYSICS = { arcade, sport, pro };

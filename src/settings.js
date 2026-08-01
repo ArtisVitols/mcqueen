@@ -27,15 +27,15 @@ const DEFAULTS = {
 export const DIFFICULTY = {
   easy: {
     label: 'Easy', aiSpeed: 0.88, aggression: 0.55, band: 0.7, playerSpeed: 1.0,
-    assist: 1.9, lift: 1.0, aiCorner: 0.88,
+    assist: 1.9, lift: 1.0, aiCorner: 0.84,
   },
   normal: {
     label: 'Normal', aiSpeed: 0.985, aggression: 1.0, band: 0.3, playerSpeed: 1.0,
     assist: 1.1, lift: 0.35, aiCorner: 0.96,
   },
   hard: {
-    label: 'Hard', aiSpeed: 1.06, aggression: 1.35, band: 0.0, playerSpeed: 1.0,
-    assist: 1.0, lift: 0, aiCorner: 1.0,
+    label: 'Hard', aiSpeed: 1.12, aggression: 1.35, band: 0.0, playerSpeed: 1.0,
+    assist: 1.0, lift: 0, aiCorner: 1.06,
   },
 };
 

@@ -144,7 +144,7 @@ export class Race {
 
     if (!player.finished) {
       input.applyTo(player, dt, this.physics);
-      driverAid(player, this.tuning.lift ?? 0, dt);
+      driverAid(player, this.tuning.lift ?? 0, dt, this.field);
     } else {
       player.throttle = 0;
       player.brake = 0.35;
@@ -183,7 +183,7 @@ export class Race {
       }
     }
 
-    this.separate();
+    this.separate(dt);
     this.updateOrder();
 
     if (this.results.length === this.field.length) this.state = State.FINISHED;
@@ -224,7 +224,7 @@ export class Race {
   }
 
   /** Cars nudge each other apart instead of occupying the same metre of track. */
-  separate() {
+  separate(dt) {
     const f = this.field;
     for (let i = 0; i < f.length; i++) {
       for (let j = i + 1; j < f.length; j++) {
@@ -247,9 +247,15 @@ export class Race {
 
         // If they still overlap there is simply no room to run side by side
         // here, so the car behind lifts rather than being pushed off the road.
+        //
+        // Per second, not per step. Unscaled this ran 120 times a second and
+        // took 14 m/s off a car in half a second of light contact - a touch
+        // read as a crash, and on a superspeedway where the field runs nose to
+        // tail that is most of the race.
         const left = 2.3 - Math.abs(b.n - a.n);
         const behind = ds > 0 ? a : b;
-        behind.speed *= left > 0 ? 1 - Math.min(0.2, left * 0.12) : 0.995;
+        const keep = left > 0 ? 1 - Math.min(0.35, left * 0.2) : 0.6;
+        behind.speed *= Math.pow(keep, dt);
       }
     }
   }

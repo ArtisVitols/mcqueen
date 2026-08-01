@@ -41,6 +41,11 @@ export class Car {
 
     this.throttle = 0;
     this.brake = 0;
+    // What the driver is asking for, and what the tyres are actually given.
+    // They are not the same field, because the driver aid rewrites the second
+    // one: ramping the input on top of the controller's own output fed it back
+    // on itself and the car stopped responding to the buttons at all.
+    this.steerCmd = 0;
     this.steer = 0;
     this.steerAngle = 0;             // front wheel angle, for the visuals
     this.slip = 0;                   // 0..1, drives tyre squeal
@@ -67,9 +72,12 @@ export class Car {
     this.vy = 0;
     this.yawRate = 0;
     this.psiPrev = 0;
+    this.psiRate = 0;
     this.gear = 0;
     this.shiftT = 0;
     this.aidLane = lane;
+    this.steerCmd = 0;
+    this.steer = 0;
     this.progress = -back;
     this.lap = 1;
     this.finished = false;
