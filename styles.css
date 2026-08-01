@@ -200,6 +200,21 @@ button.big.ghost {
   width: 100%;
 }
 .pills { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Handling lives under the track picker rather than in the switch grid: at
+   667px the grid collapses to one column, and a fifth row there pushed BACK
+   off the bottom. The left column has the room. */
+.hint {
+  margin-top: 2px;
+  font-size: clamp(9px, 1.6vh, 11px);
+  opacity: 0.55;
+  min-height: 1.1em;
+}
+/* On the shortest phones the panel is full to the millimetre, and the pill
+   labels say enough on their own. Losing a line of prose beats losing BACK
+   off the bottom of the screen. */
+@media (max-height: 400px) {
+  .hint { display: none; }
+}
 .pill {
   padding: 5px 11px;
   border-radius: 999px;
@@ -250,6 +265,12 @@ button.big.ghost {
 .hud-label { font-size: 10px; letter-spacing: 0.16em; opacity: 0.65; }
 .hud-value { font-size: clamp(16px, 3.4vh, 26px); font-weight: 800; }
 .hud-value b { color: #ffd66b; font-size: 1.15em; }
+.hud-gear {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #8fd0ff;
+}
 
 #lights {
   position: absolute;

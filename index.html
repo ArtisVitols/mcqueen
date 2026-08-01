@@ -8,13 +8,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>McQueen Speedway</title>
-<link rel="stylesheet" href="styles.css?v=20260801-0905-19d55c8">
+<link rel="stylesheet" href="styles.css?v=20260801-1118-8f1c8f1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>">
 <!-- Stamped by tools/stamp_version.py on every deploy. GitHub Pages serves
      everything with max-age=600, so without this a phone can hold a new
      track-data.json alongside the previous track.glb for ten minutes - which
      is exactly how you end up with cars floating over a flattened road. -->
-<script>window.__BUILD__ = '20260801-0905-19d55c8';</script>
+<script>window.__BUILD__ = '20260801-1118-8f1c8f1';</script>
 <script type="importmap">
 {
   "imports": {
@@ -60,6 +60,9 @@
         <div id="car-picker" class="cards"></div>
         <label class="row-label">Race track</label>
         <div id="track-picker" class="cards"></div>
+        <label class="row-label">Handling</label>
+        <div id="opt-physics" class="pills"></div>
+        <div id="physics-blurb" class="hint"></div>
       </div>
       <div class="opt-col">
         <div class="opt-grid">
@@ -94,6 +97,7 @@
   <div class="hud-box hud-speed">
     <span class="hud-value"><b id="speed">0</b></span>
     <span class="hud-label">KM/H</span>
+    <span id="gear" class="hud-gear hidden"></span>
   </div>
   <div id="lights" class="hidden">
     <div class="bulb"></div><div class="bulb"></div><div class="bulb"></div>
@@ -139,6 +143,6 @@
   </div>
 </div>
 
-<script type="module" src="src/main.js?v=20260801-0905-19d55c8"></script>
+<script type="module" src="src/main.js?v=20260801-1118-8f1c8f1"></script>
 </body>
 </html>

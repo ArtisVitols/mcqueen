@@ -28,10 +28,11 @@ export class Driver {
   }
 
   /**
-   * @param {Car[]} field    every car in the race
-   * @param {object} tuning  difficulty settings
+   * @param {Car[]} field     every car in the race
+   * @param {object} tuning   difficulty settings
+   * @param {object} physics  the handling model, for its corner-speed limit
    */
-  update(dt, field, tuning) {
+  update(dt, field, tuning, physics = null) {
     const car = this.car;
     const track = car.track;
 
@@ -95,7 +96,12 @@ export class Driver {
     // Aim for a heading that closes the gap over roughly a second, then let
     // the car's own steering model get there.
     const wantPsi = clamp(Math.atan2(target - car.n, Math.max(12, car.speed)), -MAX_PSI, MAX_PSI);
-    car.steer = clamp((wantPsi - car.psi) * 2.6, -1, 1);
+    // Straight proportional control works when the heading *is* the command.
+    // Where the heading is a state with inertia behind it, the same gain
+    // oscillates and then spins the car, so damp on the yaw rate instead.
+    car.steer = physics?.yawModel
+      ? clamp((wantPsi - car.psi) * 1.5 - (car.yawRate || 0) * 1.1, -1, 1)
+      : clamp((wantPsi - car.psi) * 2.6, -1, 1);
 
     // --- throttle ---------------------------------------------------------
     let targetSpeed = car.topSpeed * this.pace;
@@ -108,14 +114,31 @@ export class Driver {
     if (ahead && aheadGap < 11) {
       targetSpeed = Math.min(targetSpeed, ahead.speed * (0.85 + 0.015 * aheadGap));
     }
-    // A touch of lift through the banking. Kept small on purpose: this is a
-    // superspeedway, the turns are flat-out, and anything more hands a
+    // A touch of lift through the banking. Kept small on purpose: under the
+    // arcade model the turns are flat-out, and anything more hands a
     // throttle-pinned player an easy win on every difficulty.
     targetSpeed *= 1 - Math.min(0.035, Math.abs(st.kappa) * 1000 * 0.008);
+
+    // Under a model with real grip the corner has an actual speed limit, and
+    // driving past it just means sliding up to the wall. Rivals stay a little
+    // inside it. Arcade returns Infinity, so its pace is untouched.
+    if (physics) {
+      const limit = physics.cornerSpeed(car, st, car.n);
+      if (limit < Infinity) {
+        targetSpeed = Math.min(targetSpeed, limit * (tuning.aiCorner ?? 0.94) * (car.paceScale ?? 1));
+      }
+    }
 
     const err = targetSpeed - car.speed;
     car.throttle = clamp(err * 0.5, 0, 1);
     car.brake = clamp(-err * 0.12, 0, 1);
+
+    // Feeding in more power while the tail is already out just finishes the
+    // job. Nobody wins a race spinning, so the AI backs off the moment it
+    // feels the rear go.
+    if (physics?.yawModel) {
+      car.throttle *= Math.max(0.15, 1 - Math.abs(car.vy) / 4);
+    }
   }
 }
 

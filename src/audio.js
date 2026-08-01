@@ -136,15 +136,18 @@ export class Audio {
   driveEngine(voice, car, level) {
     if (!voice) return;
     const t = this.ctx.currentTime;
-    const rev = Math.min(1, car.speed / car.topSpeed);
-    // Fake gear steps so it climbs and drops instead of one long slide.
-    const gear = Math.min(4, Math.floor(rev * 5));
-    const within = rev * 5 - gear;
+    const pace = Math.min(1, car.speed / car.topSpeed);
+    // Models with a gearbox report a real gear and a real position within it.
+    // The arcade model has neither, so fake the steps from speed - without
+    // them the engine is one long slide from the line to the flag.
+    const geared = car.physics?.geared;
+    const gear = geared ? car.gear : Math.min(4, Math.floor(pace * 5));
+    const within = geared ? car.rev : pace * 5 - Math.floor(pace * 5);
     const base = 52 + within * 62 + gear * 7;
     for (const { osc, mult } of voice.oscs) {
       osc.frequency.setTargetAtTime(base * mult, t, 0.05);
     }
-    voice.filter.frequency.setTargetAtTime(500 + rev * 2600 + car.throttle * 800, t, 0.06);
+    voice.filter.frequency.setTargetAtTime(500 + pace * 2600 + car.throttle * 800, t, 0.06);
     voice.out.gain.setTargetAtTime(level * (0.35 + 0.65 * car.throttle), t, 0.08);
   }
 

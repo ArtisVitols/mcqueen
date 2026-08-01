@@ -2,6 +2,10 @@
  * Exercise the in-race pause menu: pause, resume, change the circuit mid-race,
  * restart on it, and check the controls are laid out the right way up.
  *
+ * Also measures the options panel at every phone size we care about. It has to
+ * fit with no scrolling: it once pushed BACK off the bottom of the screen and
+ * the owner concluded a feature was missing.
+ *
  *   node tools/test_pause.mjs
  */
 import { spawn } from 'node:child_process';
@@ -24,7 +28,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 await sleep(1200);
 
 const browser = await puppeteer.launch({
-  executablePath: CHROME, headless: true, protocolTimeout: 600000,
+  executablePath: CHROME, headless: true, protocolTimeout: 1800000,
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader',
          '--enable-unsafe-swiftshader', '--hide-scrollbars', '--window-size=844,390'],
 });
@@ -122,6 +126,29 @@ restarted.track === 'palm' && restarted.cars === 7 && restarted.kmh > 30 && rest
   ? ok(`restarted on ${restarted.track} (${restarted.lapLength} m, ${restarted.kmh} km/h, 7 cars)`)
   : fail(JSON.stringify(restarted));
 await page.screenshot({ path: join(OUT, 'pause_restarted.png') });
+
+// --- the options panel has to fit, at every size ---------------------------
+await page.click('#btn-pause');
+await sleep(1200);
+for (const [w, h] of [[667, 375], [844, 390], [915, 412]]) {
+  await page.setViewport({ width: w, height: h, deviceScaleFactor: 2 });
+  await sleep(700);
+  const fit = await page.evaluate(() => {
+    const p = document.querySelector('#options .panel');
+    const last = document.getElementById('btn-restart').getBoundingClientRect();
+    return {
+      over: p.scrollHeight - p.clientHeight,
+      lastBottom: Math.round(last.bottom),
+      view: innerHeight,
+      physics: document.querySelectorAll('#opt-physics .pill').length,
+    };
+  });
+  fit.over <= 1 && fit.lastBottom <= fit.view
+    ? ok(`options fit at ${w}x${h} (${fit.physics} handling pills, ` +
+         `last button ends at ${fit.lastBottom} of ${fit.view})`)
+    : fail(`options overflow at ${w}x${h}: ${JSON.stringify(fit)}`);
+  await page.screenshot({ path: join(OUT, `options_${w}x${h}.png`) });
+}
 
 await browser.close();
 server.kill();

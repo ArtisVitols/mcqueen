@@ -7,6 +7,7 @@ import { Audio } from './audio.js';
 import { loadCar, loadTrack, disposeTrack, assetUrl } from './models.js';
 import * as Settings from './settings.js';
 import { QUALITY, DIFFICULTY, LAP_CHOICES } from './settings.js';
+import { PHYSICS } from './physics.js';
 
 const dom = (id) => document.getElementById(id);
 
@@ -302,6 +303,17 @@ class Game {
     group(dom('opt-difficulty'), Object.keys(DIFFICULTY), () => this.settings.difficulty,
       (v) => DIFFICULTY[v].label, (v) => { this.settings.difficulty = v; });
 
+    group(dom('opt-physics'), Object.keys(PHYSICS), () => this.settings.physics,
+      (v) => PHYSICS[v].label, (v) => {
+        this.settings.physics = v;
+        this.showPhysicsBlurb();
+        // The model is baked into every Car when the race is built, so a
+        // change mid-race can only take effect on a restart - same as the
+        // circuit.
+        if (this.paused) this.requireRestart();
+      });
+    this.showPhysicsBlurb();
+
     group(dom('opt-quality'), Object.keys(QUALITY), () => this.settings.quality,
       (v) => QUALITY[v].label, (v) => {
         this.settings.quality = v;
@@ -321,6 +333,10 @@ class Game {
       this.audio.setVolume(this.settings.volume);
     };
     vol.onchange = () => Settings.save(this.settings);
+  }
+
+  showPhysicsBlurb() {
+    dom('physics-blurb').textContent = (PHYSICS[this.settings.physics] || PHYSICS.arcade).blurb;
   }
 
   applyQuality() {
@@ -550,6 +566,8 @@ class Game {
     if (!race) return;
 
     race.update(dt, this.input);
+
+    for (const car of race.field) car.model.userData.wheels?.update(car, dt);
 
     const player = race.player;
     this.placeCamera(player, 1 - Math.pow(0.0016, dt));

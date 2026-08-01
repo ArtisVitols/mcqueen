@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/loaders/GLTFLoader.js';
+import { rig } from './wheels.js';
 import { MeshoptDecoder } from 'three/libs/meshopt_decoder.module.js';
 
 /**
@@ -16,6 +17,9 @@ import { MeshoptDecoder } from 'three/libs/meshopt_decoder.module.js';
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
 const ASSETS = new URL('../assets/', import.meta.url);
+
+// Height of the axis the body leans about, in metres above the road.
+const ROLL_HEIGHT = 0.42;
 
 /**
  * Resolve an asset path against the module, not the page that loaded it, and
@@ -63,7 +67,15 @@ export async function loadCar(spec) {
 
   const pivot = new THREE.Group();
   pivot.name = spec.id;
-  pivot.add(inner);
+  // The body hangs off its own pivot at about axle height so that roll and
+  // dive swing it about a sensible axis. Rolling it about the pivot origin
+  // instead - which is on the road - dips a wing 9 cm into the asphalt.
+  const bodyPivot = new THREE.Group();
+  bodyPivot.name = 'body';
+  bodyPivot.position.y = ROLL_HEIGHT;
+  inner.position.y -= ROLL_HEIGHT;
+  bodyPivot.add(inner);
+  pivot.add(bodyPivot);
   pivot.add(contactShadow(size.x * scale, size.z * scale));
 
   pivot.traverse((o) => {
@@ -77,8 +89,14 @@ export async function loadCar(spec) {
     }
   });
 
+  // Wheels come off the pivot, not out of `inner`, so the body can lean while
+  // they stay on the road.
+  const wheels = rig(pivot, bodyPivot);
+  pivot.userData.wheels = wheels;
+
   return {
     object: pivot,
+    wheels,
     size: size.clone().multiplyScalar(scale),
   };
 }

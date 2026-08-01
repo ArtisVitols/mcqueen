@@ -12,10 +12,27 @@ Open it on a phone, turn the phone sideways, tap START.
 
 - Left thumb: ◀ ▶ steer. Right thumb: ▲ gas, ▼ brake.
 - Five red lights, then green, then three laps. Lap counter is top right.
-- OPTIONS sets your car, the circuit, laps (1/3/5), difficulty, graphics
-  quality and sound.
+- OPTIONS sets your car, the circuit, handling, laps (1/3/5), difficulty,
+  graphics quality and sound.
 - Difficulty is **Easy** by default: holding the throttle down is enough to
-  win. Normal is close, Hard beats a flat-out player.
+  win, whichever handling model is picked. Normal is close, Hard beats a
+  flat-out player.
+- The wheels turn at road speed, the front pair steers, and the body leans into
+  the corners and noses down under braking.
+
+## Handling
+
+Three models, switchable in OPTIONS and mid-race from the pause menu. Everyone
+on track drives whichever you choose.
+
+| | |
+|---|---|
+| **Arcade** | The default. Hold the gas and the car follows the track; cornering costs nothing and you cannot spin. Built for a five-year-old. |
+| **Sport** | Real grip. Carry too much speed in and the car washes wide with the tyres howling; the high line grips, the low line is shorter. Still cannot spin. |
+| **Pro** | The rear steps out under power and you have to catch it. You *can* spin — though never so badly that you end up parked facing a wall. |
+
+Sport and Pro add a six-speed gearbox, so the engine steps through the ratios
+and the gear shows under the speed.
 
 ## The circuits
 
@@ -112,9 +129,11 @@ node  tools/refine_track.mjs palm          # heights/banking by raycasting the a
 python3 tools/inspect_track.py raw/x.glb   # materials, scale, overhead map
 node  tools/probe_points.mjs raw/x.glb 1,2 # what is actually at a world point
 
-node  tools/simulate.mjs all       # headless races: every track x difficulty
+node  tools/simulate.mjs all       # headless races: physics x track x difficulty
+node  tools/trace_lap.mjs msots sport   # why a lap was slow, half-second by half-second
 node  tools/verify_track.mjs       # shipped tracks vs physics data - run this!
 node  tools/check_ride_height.mjs  # gap between each car and the road
+node  tools/check_wheels.mjs       # four wheels per car, and proof they turn
 node  tools/shots.mjs              # drive the real game in headless Chrome
 node  tools/shots_tracks.mjs       # ... on every circuit
 ```

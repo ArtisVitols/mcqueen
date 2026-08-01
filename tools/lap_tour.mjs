@@ -35,7 +35,7 @@ await sleep(1200);
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: true,
   // SwiftShader is slow enough that the default protocol timeout trips.
-  protocolTimeout: 600000,
+  protocolTimeout: 1800000,
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader',
          '--enable-unsafe-swiftshader', `--window-size=${TILE.w},${TILE.h}`],
 });

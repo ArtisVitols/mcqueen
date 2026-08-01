@@ -55,7 +55,12 @@ const out = await page.evaluate(async () => {
 
   const rows = [];
   for (const car of g.race.field) {
-    box.setFromObject(car.model);
+    // `precise` reads the actual vertices. Without it three measures each
+    // mesh's own axis-aligned box and then rotates *that*, which for a wheel
+    // turned 45 degrees is a box 40% taller than the wheel - it reported every
+    // car with rolling wheels as sitting 17 cm under the road. It is also what
+    // McQueen needs, since the cheap path measures his bind pose.
+    box.setFromObject(car.model, true);
     const p = car.position;
     origin.set(p.x, p.y + 40, p.z);
     ray.set(origin, down);

@@ -81,10 +81,24 @@ export class Input {
     });
   }
 
-  /** Feed the current control state into a car. */
-  applyTo(car) {
+  /**
+   * Feed the current control state into a car.
+   *
+   * Two buttons give a steer input of exactly -1, 0 or 1. Arcade integrates
+   * that straight into the heading and feels fine, but a model with tyre
+   * forces needs a wheel that arrives somewhere rather than snapping to full
+   * lock - so those ramp it, at a rate the model chooses.
+   */
+  applyTo(car, dt = 0, physics = null) {
     const s = this.state;
-    car.steer = (s.right ? 1 : 0) - (s.left ? 1 : 0);
+    const want = (s.right ? 1 : 0) - (s.left ? 1 : 0);
+    const ramp = physics?.steerRamp || 0;
+    if (ramp > 0 && dt > 0) {
+      const step = ramp * dt * (want === 0 ? 1.8 : 1);   // let go faster than you turn
+      car.steer += Math.max(-step, Math.min(step, want - car.steer));
+    } else {
+      car.steer = want;
+    }
     car.throttle = s.gas ? 1 : 0;
     car.brake = s.brake ? 1 : 0;
   }

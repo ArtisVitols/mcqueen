@@ -57,21 +57,91 @@ This is the load-bearing decision. It buys:
 - Lap counting and race order are arithmetic on `s`.
 - The tangent rotates as `s` advances, so holding the throttle follows the oval
   by itself. Steering only picks a lane. That is what makes it playable for a
-  five-year-old, and it makes spinning out and facing backwards *structurally*
-  impossible rather than merely unlikely.
+  five-year-old, and under the default Arcade model it makes spinning out and
+  facing backwards *structurally* impossible rather than merely unlikely.
 - AI lane changes, drafting and overtakes are one number moving.
 - The inside line is genuinely shorter: the arc-length scale `1 + n·κ` is
   integrated in `Car.step`, so the low line pays like it does in real NASCAR.
 
 Consequences to respect:
 
-- A car's heading `psi` is clamped to ±50°. Do not remove the clamp.
+- A car's heading `psi` is clamped, to `physics.maxPsi`. Do not remove the
+  clamp; the Pro model widens it to ~150° and catches the rest itself with a
+  straightening torque past ~80°, so a spin always ends pointing forwards.
 - Track limits are a soft clamp plus a speed scrub, never a crash.
 - **The chase camera must be positioned in track space**, not by lerping a
   world position. Smoothing towards a target moving at 50 m/s leaves the camera
   a fixed `v·τ` behind — about 8 m — which is far enough for rivals to slot in
   between it and the player. `placeCamera` anchors at `car.s - back` and only
   smooths the lateral offset.
+
+## Handling models
+
+`src/physics.js` holds three, chosen in OPTIONS: **Arcade** (the original, and
+the default), **Sport** (real grip limits, still cannot spin) and **Pro** (yaw
+dynamics, can genuinely spin). Rivals drive whichever is selected.
+
+`Car.step` keeps everything the rest of the game depends on - integration in
+track space, the `psi` clamp, the rev limiter, track limits, lap counting - and
+delegates only the forces. That split is the point: a handling change can never
+become a lap-counting bug or put a car outside the corridor. Arcade's `drive()`
+is the old code moved verbatim, so its race pacing is unchanged and the
+"9 OK, Easy P1 everywhere" baseline still means something.
+
+- **The grip numbers are tuned, not looked up.** These are short ovals: 63 m
+  corner radius on Motor Speedway, 99 m on Palm Mile, 255 m on Yoyleland. An
+  honest slicks figure has the first two crawling; a textbook banked-corner
+  limit at Yoyleland's 18° goes to *infinity* (`mu·tan θ` reaches 1), which is
+  why `gripLimit` is capped. What the numbers buy is the right shape - the one
+  real superspeedway stays flat out, the two short tracks need a lift.
+- **Easy has to be winnable by holding the throttle down, under every model.**
+  Grip alone does not deliver that. Under Sport the car arrives at a 63 m
+  corner doing 280 and scrubs along the wall; under Pro it is worse, because
+  with tyre forces driving the heading a car with no steering input cannot
+  generate the inward force a corner needs *at all* - holding the throttle is
+  not a slow way round, it is not a way round. So `driverAid` in `physics.js`
+  lifts, brakes and steers on Easy, and the buttons move the lane it holds.
+  Normal gets a third of it, Hard none.
+- **Under a grip model the AI's pace comes from `aiCorner`, not `aiSpeed`.**
+  Cornering sets lap time, so that is the knob difficulty has to turn - and the
+  rubber band has to reach it too (`car.paceScale`), or Easy quietly stops
+  reeling anybody in.
+- The AI's steering is proportional on `psi`, which works when the heading *is*
+  the command. Under Pro it is a state with inertia behind it, so the same gain
+  oscillates and then spins the car; `ai.js` damps on `yawRate` when
+  `physics.yawModel` is set.
+- A bicycle model is singular at `v = 0`: slip angle is lateral over forward
+  speed. Pro floors the reference speed and fades the tyres in, or the cars sit
+  on the grid sawing sideways with the friction circle leaving nothing to drive
+  with, and no race ever finishes.
+
+## Wheels
+
+`src/wheels.js` splits four wheels out of every car at load, spins them at road
+speed, steers the front pair and leans the body. Nothing re-exports a GLB -
+`optimize.sh` is the most trap-laden part of this repo and is left alone.
+
+- None of the models ship usable wheel nodes. Six are Sketchfab OBJ exports
+  merged **by material**, so all four wheels sit in one mesh; McQueen is skinned
+  with a 3ds Max biped whose `Bip01_wheel_*` bones are already right. Hence two
+  routes, `fromSplit` and `fromBones`.
+- **Weld before splitting.** OBJ exports repeat each corner per face, so
+  without welding every triangle is its own island.
+- **Give each wheel a compact geometry.** Sharing the vertex buffer and handing
+  each wheel a narrower index is cheaper and looks fine - but every bounding box
+  then still spans the whole car, and `check_ride_height` reported the split
+  cars sitting three metres under the road.
+- **Spin direction is derived, never assumed.** McQueen's left-hand wheelbase
+  bones carry a rotation that flips their local X, so one shared angle
+  counter-rotates a side. Every axle is signed against the car's lateral axis.
+- **The body leans, the wheels do not.** Wheels hang off the car pivot; only
+  the body group rolls and dives, about an axis at axle height, and it rises by
+  `|roll|·halfWidth` so the outside sill does not plough through the asphalt.
+  The contact shadow stays flat.
+- **`setFromObject` needs the `precise` flag near a rotated wheel.** The cheap
+  path measures each mesh's own AABB and then rotates *that*; for a wheel at 45°
+  it is 40% too tall, and `check_ride_height` reported every car 17 cm into the
+  road when nothing had moved. Same flag McQueen already needed.
 
 ## The asset pipeline, and the trap in it
 
@@ -242,7 +312,7 @@ different.
 ```bash
 export PATH="$HOME/.local/node/bin:$PATH"
 
-node tools/simulate.mjs all        # every track x difficulty, no renderer
+node tools/simulate.mjs all        # every physics x track x difficulty, no renderer
 node tools/verify_track.mjs        # shipped models vs physics data
 node tools/shots.mjs               # full game flow in headless Chrome
 node tools/shots_tracks.mjs        # ... on each circuit
@@ -251,6 +321,8 @@ node tools/diag_cars.mjs <track>   # car facing + wheels on a reference plane
 node tools/lap_tour.mjs <track>    # chase cam all the way round a lap
 node tools/check_grid.mjs          # what surface each starting slot sits on
 node tools/check_barriers.mjs      # walls inside the corridor, holes under the car
+node tools/check_wheels.mjs        # 4 wheels per car, and proof they turn
+node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout
 python3 tools/overlay_line.py <t>  # racing line drawn on the overhead render
@@ -269,9 +341,15 @@ Hicks shipped backwards.
 
 What "good" looks like right now:
 
-- `simulate.mjs all` — 9 OK. Easy is P1 on every circuit, Hard beats a
-  throttle-pinned player on every circuit. If Easy stops being a win, that is a
-  regression regardless of what else improved.
+- `simulate.mjs all` — 27 OK, i.e. every handling model x circuit x difficulty.
+  Easy is P1 on all nine combinations and Hard beats a throttle-pinned player.
+  If Easy stops being a win, that is a regression regardless of what else
+  improved. Worst heading seen anywhere is 81° with every car still finishing;
+  the run asserts nothing exceeds 172°, which is where `maxPsi` would be
+  holding it.
+- `check_wheels.mjs` — four wheels on all seven cars, each turning 90° for a
+  quarter turn, all the same way. It checks numerically *and* renders, because
+  a tyre is nearly symmetric and a spinning one photographs as a still one.
 - `verify_track.mjs` — median height error 3 mm / 3 mm / 34 mm, and under
   0.2% of points past 0.5 m on all three. The **median** is the signal that
   catches systemic drift.

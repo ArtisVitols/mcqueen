@@ -34,7 +34,7 @@ await sleep(1200);
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: true,
-  protocolTimeout: 900000,
+  protocolTimeout: 1800000,
   args: [
     '--no-sandbox',
     '--use-gl=angle',

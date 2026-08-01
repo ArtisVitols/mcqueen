@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Car } from './car.js';
 import { Driver, makeRng } from './ai.js';
 import { DIFFICULTY } from './settings.js';
+import { PHYSICS, driverAid } from './physics.js';
 
 /**
  * A single race: the grid, the countdown, the running order and the finish.
@@ -15,6 +16,7 @@ const GRID_ROW_GAP = 9;      // metres between rows
 // it. fitGridLanes() pulls them in where it is not.
 const GRID_LANE = 3.2;
 const COUNTDOWN_STEP = 0.9;  // seconds between red lights
+const DRAFT_RANGE = 34;      // metres, matches the AI's own draft window
 
 export const State = {
   COUNTDOWN: 'countdown',
@@ -29,6 +31,7 @@ export class Race {
     this.cars = cars;                       // [{spec, object}]
     this.settings = settings;
     this.tuning = DIFFICULTY[settings.difficulty] || DIFFICULTY.easy;
+    this.physics = PHYSICS[settings.physics] || PHYSICS.arcade;
     this.totalLaps = settings.laps;
     this.rng = makeRng(0x5eed);
 
@@ -57,10 +60,12 @@ export class Race {
     const lanes = this.fitGridLanes(Math.ceil(order.length / 2));
 
     order.forEach((entry, i) => {
-      const car = new Car(entry.spec, entry.object, track);
+      const car = new Car(entry.spec, entry.object, track, this.physics);
       car.isPlayer = entry.spec.id === playerId;
       car.totalLaps = this.totalLaps;
       car.topSpeed = 78 * (car.isPlayer ? this.tuning.playerSpeed : this.tuning.aiSpeed);
+      // The grip assist is the player's alone; rivals are paced by aiSpeed.
+      car.assist = car.isPlayer ? (this.tuning.assist ?? 1) : 1;
 
       const row = Math.floor(i / 2);
       // Row 0 sits just behind the line; the pack stretches back from there.
@@ -138,7 +143,8 @@ export class Race {
     const player = this.player;
 
     if (!player.finished) {
-      input.applyTo(player);
+      input.applyTo(player, dt, this.physics);
+      driverAid(player, this.tuning.lift ?? 0, dt);
     } else {
       player.throttle = 0;
       player.brake = 0.35;
@@ -153,9 +159,13 @@ export class Race {
         car.steer = 0;
         continue;
       }
-      driver.update(dt, this.field, this.tuning);
+      driver.update(dt, this.field, this.tuning, this.physics);
       this.rubberBand(car);
     }
+
+    // The AI gets its tow through its own target speed; the player has no such
+    // controller, so the models that model drag need to be told about it here.
+    this.updateDraft(player);
 
     for (const car of this.field) {
       const before = car.lap;
@@ -186,14 +196,31 @@ export class Race {
    */
   rubberBand(car) {
     const band = this.tuning.band;
-    if (!band) return;
+    if (!band) { car.paceScale = 1; return; }
     const gap = this.player.progress - car.progress;   // negative: AI ahead
     const norm = THREE.MathUtils.clamp(gap / 260, -1, 1);
     // Asymmetric on purpose: an AI that has escaped gets reeled in hard, but
     // one that is behind only gets a small tow. Falling behind should be
     // recoverable; leading should still feel earned.
     const scale = norm < 0 ? 0.22 : 0.07;
-    car.topSpeed = 78 * this.tuning.aiSpeed * (1 + norm * band * scale);
+    // Under a grip model an AI's pace is set by how hard it corners, not by
+    // its top speed, so the band has to reach the corner cap as well or Easy
+    // quietly stops reeling anybody in.
+    car.paceScale = 1 + norm * band * scale;
+    car.topSpeed = 78 * this.tuning.aiSpeed * car.paceScale;
+  }
+
+  /** How deep in another car's tow this car is, 0..1. */
+  updateDraft(car) {
+    let best = 0;
+    for (const other of this.field) {
+      if (other === car) continue;
+      const gap = this.track.delta(car.s, other.s);
+      if (gap <= 2 || gap > DRAFT_RANGE) continue;
+      if (Math.abs(other.n - car.n) > 2.6) continue;
+      best = Math.max(best, 1 - gap / DRAFT_RANGE);
+    }
+    car.draft = best;
   }
 
   /** Cars nudge each other apart instead of occupying the same metre of track. */

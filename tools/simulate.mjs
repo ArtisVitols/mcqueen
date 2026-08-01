@@ -6,8 +6,8 @@
  * limits, whether overtakes actually happen and whether each difficulty is
  * winnable by a player who simply holds the throttle down.
  *
- *   node tools/simulate.mjs all            every track x every difficulty
- *   node tools/simulate.mjs <track> <difficulty> [laps]
+ *   node tools/simulate.mjs all            every physics x track x difficulty
+ *   node tools/simulate.mjs <track> <difficulty> [physics] [laps]
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { Track } from '../src/track.js';
 import { Race, State } from '../src/race.js';
 import { DIFFICULTY } from '../src/settings.js';
+import { PHYSICS } from '../src/physics.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
@@ -39,6 +40,7 @@ class FlatOut {
 export const TRACKS = read('assets/tracks.json').tracks;
 
 export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3,
+                           physics = 'arcade',
                            playerId = 'lightning_mcqueen', steerNoise = 0 } = {}) {
   const spec = TRACKS.find((t) => t.id === trackId) || TRACKS[0];
   const track = new Track(read(`assets/${spec.data}`));
@@ -47,13 +49,13 @@ export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3
   const entries = specs.map((carSpec) => ({ spec: carSpec, object: new THREE.Object3D() }));
   // gridLanes has to come through, or the sim races a grid the game never uses
   // and quietly misses cars starting outside the corridor.
-  const race = new Race(track, entries, { difficulty, laps, car: playerId },
+  const race = new Race(track, entries, { difficulty, laps, physics, car: playerId },
                         spec.gridLanes).build(playerId);
 
   const input = new FlatOut(steerNoise);
   const stats = {
     offTrack: 0, maxLateral: 0, minSpeed: Infinity, maxSpeed: 0,
-    laneChanges: 0, overtakes: 0, contact: 0, offExamples: [],
+    laneChanges: 0, overtakes: 0, contact: 0, maxPsi: 0, offExamples: [],
   };
   const lapCrossings = new Map(race.field.map((c) => [c, 0]));
   let prevOrder = race.order.map((c) => c.spec.id);
@@ -80,6 +82,7 @@ export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3
         }
       }
       stats.maxLateral = Math.max(stats.maxLateral, Math.abs(car.n));
+      stats.maxPsi = Math.max(stats.maxPsi, Math.abs(car.psi));
       if (race.state === State.RACING && !car.finished) {
         stats.minSpeed = Math.min(stats.minSpeed, car.speed);
         stats.maxSpeed = Math.max(stats.maxSpeed, car.speed);
@@ -101,19 +104,21 @@ export function simulate({ trackId = TRACKS[0].id, difficulty = 'easy', laps = 3
     prevOrder = order;
   }
 
-  return { race, track, stats, seconds: t, laps, difficulty, lapCrossings, spec };
+  return { race, track, stats, seconds: t, laps, difficulty, physics, lapCrossings, spec };
 }
 
 function report(run) {
-  const { race, stats, seconds, laps, difficulty, track, spec } = run;
+  const { race, stats, seconds, laps, difficulty, physics, track, spec } = run;
   const player = race.player;
   const lapTime = seconds / laps;
 
-  console.log(`\n=== ${spec.short} / ${difficulty.toUpperCase()}  ${laps} lap(s) ===`);
+  console.log(`\n=== ${spec.short} / ${PHYSICS[physics].label} / ${difficulty.toUpperCase()}` +
+              `  ${laps} lap(s) ===`);
   console.log(`race time      ${seconds.toFixed(1)} s   (~${lapTime.toFixed(1)} s/lap)`);
   console.log(`lap length     ${track.lapLength.toFixed(0)} m`);
   console.log(`speeds         ${(stats.minSpeed * 3.6).toFixed(0)} - ${(stats.maxSpeed * 3.6).toFixed(0)} km/h`);
   console.log(`off-track      ${stats.offTrack} samples   max |lateral| ${stats.maxLateral.toFixed(1)} m`);
+  console.log(`max heading    ${(stats.maxPsi * 57.3).toFixed(0)} deg off the tangent`);
   console.log(`lane changes   ${stats.laneChanges}   position swaps ${stats.overtakes}`);
   console.log('finishing order:');
   for (const car of race.order) {
@@ -142,6 +147,7 @@ function report(run) {
   if (stats.laneChanges < 3) problems.push('almost no lane changes - the AI is not racing');
   if (stats.overtakes < 2) problems.push('almost no position swaps - the field is static');
   if (stats.maxSpeed * 3.6 < 150) problems.push('cars never got up to racing speed');
+  if (stats.maxPsi > 3.0) problems.push(`a car reached ${(stats.maxPsi * 57.3).toFixed(0)} deg off the tangent`);
   return problems;
 }
 
@@ -153,32 +159,39 @@ if (!isMain) {
 } else if (args[0] === 'all' || args.length === 0) {
   let failed = 0;
   const placings = {};
-  for (const spec of TRACKS) {
-    for (const difficulty of Object.keys(DIFFICULTY)) {
-      const run = simulate({ trackId: spec.id, difficulty, laps: 3 });
-      const problems = report(run);
-      placings[`${spec.id}/${difficulty}`] = run.race.player.place;
-      if (problems.length) {
-        failed++;
-        console.log('PROBLEMS:');
-        for (const p of problems) console.log('  ! ' + p);
-      } else {
-        console.log('OK');
+  for (const physics of Object.keys(PHYSICS)) {
+    for (const spec of TRACKS) {
+      for (const difficulty of Object.keys(DIFFICULTY)) {
+        const run = simulate({ trackId: spec.id, difficulty, laps: 3, physics });
+        const problems = report(run);
+        placings[`${physics}/${spec.id}/${difficulty}`] = run.race.player.place;
+        if (problems.length) {
+          failed++;
+          console.log('PROBLEMS:');
+          for (const p of problems) console.log('  ! ' + p);
+        } else {
+          console.log('OK');
+        }
       }
     }
   }
   console.log('\n=== player position, holding the throttle flat ===');
-  for (const [k, p] of Object.entries(placings)) console.log(`  ${k.padEnd(16)} P${p}`);
-  for (const spec of TRACKS) {
-    if (placings[`${spec.id}/easy`] > 2) {
-      console.log(`  ! easy on ${spec.short} should be winnable for a five-year-old`);
-      failed++;
+  for (const [k, p] of Object.entries(placings)) console.log(`  ${k.padEnd(24)} P${p}`);
+  // A five-year-old can tap any entry in the menu, so Easy has to be winnable
+  // under every handling model, not just the default one.
+  for (const physics of Object.keys(PHYSICS)) {
+    for (const spec of TRACKS) {
+      if (placings[`${physics}/${spec.id}/easy`] > 2) {
+        console.log(`  ! easy on ${spec.short} / ${PHYSICS[physics].label} should be winnable`);
+        failed++;
+      }
     }
   }
   process.exit(failed ? 1 : 0);
 } else {
   const problems = report(simulate({ trackId: args[0], difficulty: args[1] || 'easy',
-                                     laps: Number(args[2] || 3) }));
+                                     physics: args[2] || 'arcade',
+                                     laps: Number(args[3] || 3) }));
   if (problems.length) { console.log('PROBLEMS:'); problems.forEach((p) => console.log('  ! ' + p)); }
   process.exit(problems.length ? 1 : 0);
 }

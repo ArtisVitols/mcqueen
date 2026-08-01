@@ -34,7 +34,7 @@ process.on('exit', () => server.kill());
 await new Promise((r) => setTimeout(r, 1200));
 
 const browser = await puppeteer.launch({
-  executablePath: CHROME, headless: true, protocolTimeout: 900000,
+  executablePath: CHROME, headless: true, protocolTimeout: 1800000,
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
 });
 const page = await browser.newPage();

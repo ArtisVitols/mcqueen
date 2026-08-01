@@ -29,7 +29,7 @@ await sleep(1200);
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: true,
   // SwiftShader takes over a minute a frame budget on the heaviest circuit.
-  protocolTimeout: 900000,
+  protocolTimeout: 1800000,
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader',
          '--enable-unsafe-swiftshader', '--hide-scrollbars',
          '--autoplay-policy=no-user-gesture-required',

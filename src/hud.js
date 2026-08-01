@@ -6,12 +6,14 @@ export class Hud {
     this.place = root.querySelector('#place');
     this.placeTotal = root.querySelector('#place-total');
     this.speed = root.querySelector('#speed');
+    this.gear = root.querySelector('#gear');
     this.lights = root.querySelector('#lights');
     this.bulbs = [...root.querySelectorAll('#lights .bulb')];
     this.flash = root.querySelector('#flash');
     this._lap = -1;
     this._place = -1;
     this._speed = -1;
+    this._gear = -1;
   }
 
   setLaps(total) {
@@ -36,6 +38,13 @@ export class Hud {
     if (kmh !== this._speed) {
       this.speed.textContent = kmh;
       this._speed = kmh;
+    }
+    // Only the models with a gearbox have a gear worth showing.
+    const gear = car.physics?.geared ? car.gear + 1 : 0;
+    if (gear !== this._gear) {
+      this.gear.textContent = gear ? `GEAR ${gear}` : '';
+      this.gear.classList.toggle('hidden', !gear);
+      this._gear = gear;
     }
   }
 
