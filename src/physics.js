@@ -472,10 +472,18 @@ function rateSteer(car, rate, dt = 0) {
  * lunge, and the damping in rateSteer is on the yaw rate, which is the state
  * that actually carries the overshoot.
  */
-export function laneSteer(car, target, dt = 0) {
-  const close = car.physics.laneClose ?? LANE_CLOSE;
-  return rateSteer(car, clamp((target - car.n) * close, -LANE_RATE_MAX, LANE_RATE_MAX), dt);
+export function laneSteer(car, target, dt = 0, close = null) {
+  const k = close ?? car.physics.laneClose ?? LANE_CLOSE;
+  return rateSteer(car, clamp((target - car.n) * k, -LANE_RATE_MAX, LANE_RATE_MAX), dt);
 }
+
+/**
+ * Closing rate for a move the driver has committed to, as opposed to simply
+ * holding a lane. Easing across at the lane-holding rate takes three seconds
+ * under the Pro model, which is longer than an overtake or a defensive move
+ * lasts - so the move was abandoned half-finished every time.
+ */
+export const COMMITTED_CLOSE = 2.2;
 
 /* ----------------------------------------------------------- driver aid -- */
 

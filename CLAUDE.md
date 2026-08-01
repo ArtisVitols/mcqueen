@@ -143,6 +143,37 @@ is the old code moved verbatim, so its race pacing is unchanged and the
   raw per-step difference of a thousandth of a radian reads as 0.6 rad/s, which
   at racing speed is 40 m/s^2 of cornering load that is not there.
 
+## Rivals that fight back
+
+`Driver.fight` is a grudge, 0..1: it jumps when a *human* passes within 25 m,
+buys that driver pace, corner commitment, a better tow and more appetite for a
+move, and halves every 8 seconds. `tuning.defend` is separate - how far they
+will move to cover the inside line before you commit. Both are per-difficulty.
+
+- **The rubber band has to stand down for a car with a grudge.** `rubberBand`
+  reels in any AI that gets ahead, which is precisely the car trying to come
+  back at you, so `Race.rubberBand` scales its reeling-in by `1 - car.fight`.
+  Take the handicap off for ten seconds, then fade it back in: that *is* the
+  "they get harder, then they get weaker again" the owner asked for.
+- **A car directly behind the one that just passed it can never be closing**,
+  because the same AI lifts rather than driving through the back of anybody. So
+  requiring closing speed before attempting a move locked a rival into second
+  place the instant it lost first. A grudge lets it pull out regardless.
+- **A committed move needs a brisk closing rate.** Under Pro the lane-holding
+  gain crosses 1.4 m in about three seconds, which is longer than an overtake
+  or a defensive move lasts, so every move was abandoned half-finished.
+  `COMMITTED_CLOSE` is used while `commit` or `defend` is up, and the ordinary
+  gain for drifting back to the line afterwards.
+- **Defending concedes.** One move to cover the inside, held a couple of
+  seconds, then a cooldown - and dropped the moment the challenger is
+  alongside. Easy sets `defend: 0` outright; a five-year-old holding the
+  throttle down has to be able to get past, and that outranks the racing.
+- **A finished car keeps rolling and moves to the outside** (`Race.coolDown`).
+  Braking to a stop is fine when the field finishes within seconds of each
+  other and a race-stopper when it does not: over five laps the leaders parked
+  on the racing line, the last car would not drive through them, and the race
+  never ended.
+
 ## Steering, and why it is one function
 
 Every car - AI, player, all three models - steers through `laneSteer` /
@@ -396,6 +427,7 @@ node tools/check_grid.mjs          # what surface each starting slot sits on
 node tools/check_barriers.mjs      # walls inside the corridor, holes under the car
 node tools/check_wheels.mjs        # 4 wheels per car, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
+node tools/check_racing.mjs        # how hard is it actually to overtake?
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout
@@ -425,6 +457,14 @@ What "good" looks like right now:
 - `check_wheels.mjs` — four wheels on all seven cars, each turning 90° for a
   quarter turn, all the same way. It checks numerically *and* renders, because
   a tyre is nearly symmetric and a spinning one photographs as a still one.
+- `check_racing.mjs` — the answer to "can I pass them?" as a number. It counts
+  *duels* (drawing alongside) and what fraction get converted, over five laps,
+  **ignoring the opening lap** — the player starts at the back and goes by most
+  of the field while everyone is still accelerating, and counting that gave
+  every difficulty an identical six passes and hid the thing being measured.
+  Passes alone are ambiguous too: zero means both "dominant, nobody left to
+  pass" and "cannot get by". The conversion rate separates them. Today:
+  Normal converts 43–86%, Hard 0–42% from two to three times as many duels.
 - `check_steering.mjs` — every model at every difficulty moves the car at
   1.5 m/s or more across the road at full lock and settles when released, and
   the field weaves less than six times a lap **on the straights**. Counting

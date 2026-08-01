@@ -23,19 +23,27 @@ const DEFAULTS = {
  * other half of the same problem: under a grip model the rivals' pace is set
  * by how hard they corner, not by `aiSpeed`, so that is what Easy has to turn
  * down.
+ *
+ * `fight` and `defend` are what make a pass mean something. `fight` is how
+ * much of a grudge a rival takes when you get by - it buys them pace and
+ * corner commitment for the next ten seconds, so they come back at you.
+ * `defend` is how far they will move to cover the inside line *before* you
+ * commit; they always concede once you are alongside. Easy defends not at all,
+ * on purpose: a five-year-old holding the throttle down has to be able to get
+ * past, and that rule outranks the racing.
  */
 export const DIFFICULTY = {
   easy: {
     label: 'Easy', aiSpeed: 0.88, aggression: 0.55, band: 0.7, playerSpeed: 1.0,
-    assist: 1.9, lift: 1.0, aiCorner: 0.84,
+    assist: 1.9, lift: 1.0, aiCorner: 0.84, fight: 0.15, defend: 0,
   },
   normal: {
-    label: 'Normal', aiSpeed: 0.985, aggression: 1.0, band: 0.3, playerSpeed: 1.0,
-    assist: 1.1, lift: 0.35, aiCorner: 0.96,
+    label: 'Normal', aiSpeed: 0.95, aggression: 1.0, band: 0.3, playerSpeed: 1.0,
+    assist: 1.0, lift: 0.35, aiCorner: 0.92, fight: 0.7, defend: 0.15,
   },
   hard: {
-    label: 'Hard', aiSpeed: 1.12, aggression: 1.35, band: 0.0, playerSpeed: 1.0,
-    assist: 1.0, lift: 0, aiCorner: 1.06,
+    label: 'Hard', aiSpeed: 1.04, aggression: 1.35, band: 0.12, playerSpeed: 1.0,
+    assist: 1.0, lift: 0, aiCorner: 1.06, fight: 1.0, defend: 1.0,
   },
 };
 

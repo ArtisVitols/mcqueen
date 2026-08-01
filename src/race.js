@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Car } from './car.js';
 import { Driver, makeRng } from './ai.js';
 import { DIFFICULTY } from './settings.js';
-import { PHYSICS, driverAid } from './physics.js';
+import { PHYSICS, driverAid, laneSteer } from './physics.js';
 
 /**
  * A single race: the grid, the countdown, the running order and the finish.
@@ -146,17 +146,13 @@ export class Race {
       input.applyTo(player, dt, this.physics);
       driverAid(player, this.tuning.lift ?? 0, dt, this.field);
     } else {
-      player.throttle = 0;
-      player.brake = 0.35;
-      player.steer = 0;
+      this.coolDown(player, dt);
     }
 
     for (const driver of this.drivers) {
       const car = driver.car;
       if (car.finished) {
-        car.throttle = 0;
-        car.brake = 0.3;
-        car.steer = 0;
+        this.coolDown(car, dt);
         continue;
       }
       driver.update(dt, this.field, this.tuning, this.physics);
@@ -190,6 +186,23 @@ export class Race {
   }
 
   /**
+   * A car that has taken the flag keeps rolling, and moves out of the way.
+   *
+   * Braking to a stop is fine when the whole field finishes within a few
+   * seconds of each other, and a race-stopper when it does not: over five laps
+   * the leaders parked themselves on the racing line, the last car could not
+   * get past - the AI will not drive through the back of anybody - and the
+   * race simply never ended.
+   */
+  coolDown(car, dt) {
+    const st = this.track.sample(car.s, car.st);
+    car.steer = laneSteer(car, this.track.limit(st, 1) - 1.0, dt);
+    const target = car.topSpeed * 0.45;
+    car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.5, 0, 1);
+    car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.12, 0, 1);
+  }
+
+  /**
    * Keep the race close enough that a five-year-old stays in it. Only the AI
    * is adjusted, and only within a few per cent, so the pack still races each
    * other rather than waiting around.
@@ -202,7 +215,12 @@ export class Race {
     // Asymmetric on purpose: an AI that has escaped gets reeled in hard, but
     // one that is behind only gets a small tow. Falling behind should be
     // recoverable; leading should still feel earned.
-    const scale = norm < 0 ? 0.22 : 0.07;
+    //
+    // A car with a grudge is not reeled in at all. The handicap is what keeps
+    // the pack catchable, and taking it off for the ten seconds after somebody
+    // passes them is what lets them come back and have a go - then it fades in
+    // again as the grudge does, and they settle.
+    const scale = norm < 0 ? 0.22 * (1 - (car.fight || 0)) : 0.07;
     // Under a grip model an AI's pace is set by how hard it corners, not by
     // its top speed, so the band has to reach the corner cap as well or Easy
     // quietly stops reeling anybody in.

@@ -1,4 +1,4 @@
-import { laneSteer } from './physics.js';
+import { laneSteer, COMMITTED_CLOSE } from './physics.js';
 
 /**
  * Opponent driver logic.
@@ -16,6 +16,29 @@ const DRAFT_RANGE = 34;
 const CAR_LENGTH = 5;
 const PASS_GAP = 3.4;       // how far beside the car being passed to aim
 
+// Being overtaken by a human. `fight` is a grudge: it rises the moment they
+// get by and decays over the next ten seconds or so, and while it is up this
+// driver has more pace, more corner speed and more appetite for a move. It is
+// deliberately a *duel* with the car that just passed - Race.rubberBand
+// remains the global "keep the pack catchable" control, and the two do
+// different jobs.
+const FIGHT_RANGE = 25;     // metres; closer than this and a pass is personal
+const FIGHT_FORGET = 60;    // ... and past this they give up and settle down
+const FIGHT_HALFLIFE = 8;   // seconds for the grudge to halve
+const FIGHT_PACE = 0.12;    // extra top speed at full grudge
+const FIGHT_CORNER = 0.06;  // ... and extra corner commitment
+const FIGHT_TOW = 0.05;     // ... and a better tow
+
+// Covering the line. One move to take the inside before the challenger
+// commits, held for a couple of seconds, then a cooldown. Never a reaction to
+// where they have already got to: the moment they are alongside this driver
+// concedes the line and races them side by side. That is the difference
+// between hard to pass and cheap to lose to.
+const DEFEND_RANGE = 15;    // metres behind that counts as a threat
+const DEFEND_STEP = 1.4;    // how far towards the inside the move goes
+const DEFEND_HOLD = 2.5;    // seconds the covered line is held
+const DEFEND_COOL = 4.0;    // ... before the line may be covered again
+
 export class Driver {
   constructor(car, spec, rng) {
     this.car = car;
@@ -26,7 +49,46 @@ export class Driver {
     this.rng = rng;
     this.commit = 0;          // seconds left on the current overtake
     this.cool = 0;            // ... and before another may be started
+    this.fight = 0;           // 0..1 grudge against whoever just passed
+    this.defend = 0;          // seconds left holding a covered line
+    this.defendCool = 0;
+    this.rel = new Map();     // human car -> where they were, to spot a pass
     this.wander = rng() * Math.PI * 2;
+  }
+
+  /**
+   * Watch the humans go by.
+   *
+   * A pass is a change of sign in "how far ahead of me are they", close
+   * enough that it happened here rather than a straight away. Only humans
+   * count: an AI holding a grudge against another AI is churn nobody sees,
+   * and the point of this is to make *your* race harder.
+   */
+  updateFight(dt, field, tuning) {
+    const car = this.car;
+    let nearest = Infinity;
+
+    for (const other of field) {
+      if (!other.isPlayer || other.finished) continue;
+      const gap = other.progress - car.progress;      // positive: they are ahead
+      const was = this.rel.get(other);
+      this.rel.set(other, gap);
+      nearest = Math.min(nearest, Math.abs(gap));
+      if (was === undefined) continue;
+      if (was < 0 && gap >= 0 && Math.abs(gap) < FIGHT_RANGE) {
+        this.fight = Math.min(1, this.fight + (tuning.fight ?? 0));
+      }
+    }
+
+    this.fight *= Math.pow(0.5, dt / FIGHT_HALFLIFE);
+    // Out of reach, so stop chasing. Without this a driver hounds a player who
+    // is half a lap up, which is neither realistic nor any fun to be behind.
+    if (nearest > FIGHT_FORGET) this.fight = 0;
+    if (this.fight < 0.01) this.fight = 0;
+    // Race.rubberBand reads this off the car. Without it the handicap that
+    // keeps the pack catchable would reel in the one car that is trying to
+    // come back at you, which is the opposite of the point.
+    car.fight = this.fight;
   }
 
   /**
@@ -38,6 +100,8 @@ export class Driver {
     const car = this.car;
     const track = car.track;
 
+    this.updateFight(dt, field, tuning);
+
     // Slow drift of the preferred lane so the pack breathes instead of
     // running on rails.
     this.wander += dt * 0.35;
@@ -48,6 +112,8 @@ export class Driver {
     let aheadGap = Infinity;
     let blockedInside = false;
     let blockedOutside = false;
+    let chall = null;          // the human closing on us from behind
+    let challGap = Infinity;
 
     for (const other of field) {
       if (other === car) continue;
@@ -64,18 +130,45 @@ export class Driver {
           if (dn > 1.2 && dn < 9) blockedOutside = true;
         }
       }
+      if (other.isPlayer && !other.finished && gap < 0 && -gap < challGap &&
+          -gap < DEFEND_RANGE && other.speed > car.speed) {
+        chall = other;
+        challGap = -gap;
+      }
     }
 
     // --- choose a lane ----------------------------------------------------
     this.commit = Math.max(0, this.commit - dt);
     this.cool = Math.max(0, this.cool - dt);
+    this.defend = Math.max(0, this.defend - dt);
+    this.defendCool = Math.max(0, this.defendCool - dt);
+
+    // Concede the moment they are alongside. Holding a line against a car that
+    // is already there is not defending, it is driving into them.
+    if (chall && challGap < CAR_LENGTH) this.defend = 0;
+
+    // Cover the inside before they commit - one move, then leave it alone.
+    if (chall && (tuning.defend ?? 0) > 0 && this.defend <= 0 &&
+        this.defendCool <= 0 && this.commit <= 0 && challGap > CAR_LENGTH) {
+      const inside = Math.min(car.n, chall.n) - DEFEND_STEP * (tuning.defend ?? 0);
+      this.lane = inside;
+      this.defend = DEFEND_HOLD;
+      this.defendCool = DEFEND_COOL;
+    }
 
     if (ahead && this.commit <= 0 && this.cool <= 0 && aheadGap < 30) {
       // Only pull out for someone you are actually catching. Diving on a car
       // going the same speed just means sitting alongside it and coming back.
+      //
+      // Unless there is a grudge, and then pull out regardless: a car sitting
+      // right behind the one that just passed it can never *be* closing,
+      // because the same code lifts to avoid driving through the back of them.
+      // Requiring closing speed to attempt a move therefore locked a rival
+      // into second place the instant it lost first, which is exactly the
+      // fight-back that is supposed to happen here.
       const closing = car.speed - ahead.speed;
-      const keen = this.aggression * tuning.aggression;
-      if (closing > 0.5 && this.rng() < keen * dt * 2) {
+      const keen = this.aggression * tuning.aggression * (1 + this.fight);
+      if ((closing > 0.5 || this.fight > 0.3) && this.rng() < keen * dt * 2) {
         // Aim beside the car being passed, not a fixed distance from wherever
         // this car happens to be - repeating the latter walks the car across
         // the track a lane at a time.
@@ -85,7 +178,7 @@ export class Driver {
       }
     }
     let want;
-    if (this.commit > 0) {
+    if (this.commit > 0 || this.defend > 0) {
       want = this.lane;
     } else {
       // Drift back to the preferred line, then wait before trying again. The
@@ -104,14 +197,20 @@ export class Driver {
     // driver aiming at the last centimetre of it spends the lap on the clamp.
     const st = track.sample(car.s, car.st);
     const target = clamp(want, track.limit(st, -1) + 1.5, track.limit(st, 1) - 1.5);
-    car.steer = laneSteer(car, target, dt);
+    // A move being committed to is made briskly; drifting back to the racing
+    // line afterwards is not.
+    const committed = this.commit > 0 || this.defend > 0;
+    car.steer = laneSteer(car, target, dt, committed ? COMMITTED_CLOSE : null);
 
     // --- throttle ---------------------------------------------------------
-    let targetSpeed = car.topSpeed * this.pace;
+    // A driver with a grudge finds a little more everywhere, which is what
+    // makes a pass something you then have to defend rather than the end of
+    // the matter.
+    let targetSpeed = car.topSpeed * this.pace * (1 + FIGHT_PACE * this.fight);
 
     // Drafting: tucked in behind someone is worth real speed on a superspeedway.
     if (ahead && aheadGap < DRAFT_RANGE && Math.abs(ahead.n - car.n) < 2.5) {
-      targetSpeed *= 1 + 0.07 * (1 - aheadGap / DRAFT_RANGE);
+      targetSpeed *= 1 + (0.07 + FIGHT_TOW * this.fight) * (1 - aheadGap / DRAFT_RANGE);
     }
     // Do not drive through the back of the car in front.
     if (ahead && aheadGap < 11) {
@@ -128,7 +227,8 @@ export class Driver {
     if (physics) {
       const limit = physics.cornerSpeed(car, st, car.n);
       if (limit < Infinity) {
-        targetSpeed = Math.min(targetSpeed, limit * (tuning.aiCorner ?? 0.94) * (car.paceScale ?? 1));
+        const commitment = (tuning.aiCorner ?? 0.94) * (1 + FIGHT_CORNER * this.fight);
+        targetSpeed = Math.min(targetSpeed, limit * commitment * (car.paceScale ?? 1));
       }
     }
 
