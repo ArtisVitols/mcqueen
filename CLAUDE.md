@@ -86,7 +86,7 @@ track space, the `psi` clamp, the rev limiter, track limits, lap counting - and
 delegates only the forces. That split is the point: a handling change can never
 become a lap-counting bug or put a car outside the corridor. Arcade's `drive()`
 is the old code moved verbatim, so its race pacing is unchanged and the
-"9 OK, Easy P1 everywhere" baseline still means something.
+"Easy is P1 everywhere" baseline still means something.
 
 - **The grip numbers are tuned, not looked up.** These are short ovals: 63 m
   corner radius on Motor Speedway, 99 m on Palm Mile, 255 m on Yoyleland. An
@@ -509,9 +509,10 @@ Hicks shipped backwards.
 
 What "good" looks like right now:
 
-- `simulate.mjs all` — 27 OK, i.e. every handling model x circuit x difficulty.
-  Easy is P1 on all nine combinations. Hard beats a throttle-pinned player on
-  eight of nine; Pro on Motor Speedway is the exception and wants a look.
+- `simulate.mjs all` — 30 OK: every handling model x circuit x difficulty,
+  plus a two-player grid on each circuit. Easy is P1 on all nine
+  model x circuit combinations. Hard beats a throttle-pinned player on eight of
+  nine; Pro on Motor Speedway is the exception and wants a look.
   If Easy stops being a win, that is a regression regardless of what else
   improved. Worst heading seen anywhere is 81° with every car still finishing;
   the run asserts nothing exceeds 172°, which is where `maxPsi` would be
@@ -532,7 +533,7 @@ What "good" looks like right now:
   the field weaves less than six times a lap **on the straights**. Counting
   swings everywhere instead flags a car running wide through a corner and
   coming back, which is what it is supposed to do.
-- `verify_track.mjs` — median height error 3 mm / 3 mm / 34 mm, and under
+- `verify_track.mjs` — median height error 5 mm / 3 mm / 34 mm, and under
   0.2% of points past 0.5 m on all three. The **median** is the signal that
   catches systemic drift.
 - `check_barriers.mjs` — zero barriers and zero holes on Motor Speedway and
@@ -540,14 +541,28 @@ What "good" looks like right now:
   `refine_track`'s `MAX_HALF` would trim it wrongly, and it came through the
   other extraction route. Nobody has complained about it; fixing it needs a
   per-track `MAX_HALF` first.
-- `check_grid.mjs` — every slot on the racing surface: `Material.107` on Motor
+- `check_grid.mjs` — every slot on the racing surface: `Material.105` on Motor
   Speedway, `Material.227` on Palm Mile, `Asphalt` on Yoyleland. Anything else
-  and somebody is starting in the pits.
+  and somebody is starting in the pits - `Material.107` in particular *is* the
+  pit lane, and reading it here as a pass is how the whole field raced down it
+  for a release.
+- `check_netplay.mjs` — both ends agree on the finishing order at every
+  latency, no car is ever drawn off the road, and the guest's own car sits
+  0.08 m from the host's answer in a room rising to 8.5 m at 300 ms. That last
+  figure is `2 x latency x speed` and is not a bug; it is what predicting
+  costs, and it is reported apart from the correction peaks so neither can
+  hide the other.
+- `check_twoplayer.mjs` — two tabs build an identical grid, drive, agree on
+  where everybody is to within a few metres, clear the start lights, and
+  survive one of them closing. It uses the loopback transport, so a green run
+  says nothing about the broker: only two real devices can.
 - Ride quality: vertical jitter under ~0.5 g at 50 m/s and yaw wobble under
   0.1 deg per station. Above about 1 g the car visibly shakes.
 - A session downloads ~3.5 MB and reaches the menu in about 5 s, because only
   the selected circuit loads. `assets/` totals ~9 MB across all three; the
   420k-triangle Yoyleland model is 5.9 MB of that and only arrives if picked.
+  PeerJS is another 93 KB and only arrives if somebody taps 2 PLAYERS - keep it
+  that way.
   `loadTrackById` disposes the previous track — do not start caching all three
   on a phone.
 

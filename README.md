@@ -2,11 +2,12 @@
 
 A 3D oval racing game for a phone browser, built for a five-year-old. Drive
 Lightning McQueen against six rivals from *Cars* around one of three
-NASCAR-style speedways.
+NASCAR-style speedways - on your own, or against somebody on a second phone.
 
 **Play: https://artisvitols.github.io/mcqueen/**
 
-Open it on a phone, turn the phone sideways, tap START.
+Open it on a phone, turn the phone sideways, tap START. To race someone else,
+tap 2 PLAYERS instead - see below.
 
 ## How it plays
 
@@ -58,8 +59,9 @@ and the gear shows under the speed.
 | Yoyleland Speedway | 2817 m | Big banked superspeedway, 18° in the turns |
 
 The two smaller circuits are modelled at roughly 1:15, so the game scales the
-model and the extracted racing line by the same factor - every road ends up
-about 18 m wide with life-sized cars.
+model and the extracted racing line by the same factor until the racing surface
+is a chosen width - which is what sets each circuit's real size, and why Motor
+Speedway is 2.4 km rather than 1.5.
 
 ## How it works
 
@@ -74,8 +76,8 @@ centreline, and metres sideways from it. That one decision buys a lot:
 - Lap counting and race positions are integer arithmetic on `s`.
 - The tangent rotates as `s` advances, so a player who only holds the throttle
   follows the oval by themselves. Steering just picks a lane. A five-year-old
-  can drive it, and spinning out or facing the wrong way is impossible by
-  construction.
+  can drive it, and under the default Arcade model spinning out or facing the
+  wrong way is impossible by construction.
 - The AI can dive to the inside or swing wide by moving one number.
 - The inside line is genuinely shorter, because the arc-length scale factor
   `1 + n·κ` is baked into the integration - so the low line pays, like it does
@@ -113,12 +115,16 @@ lights are all oscillators and filtered noise. No audio files are downloaded.
 ```
 index.html  styles.css          the whole app shell
 src/track.js                    centreline spline, track space <-> world
-src/car.js                      arcade physics in track space
-src/ai.js                       opponent drivers: lanes, drafting, overtakes
+src/car.js                      a car in track space; owns the invariants
+src/physics.js                  the three handling models, and the driver aid
+src/wheels.js                   splits four wheels out of each car, spins them
+src/ai.js                       opponent drivers: lanes, drafting, grudges
 src/race.js                     grid, countdown, running order, finish
+src/net.js, src/net/            two-player protocol and its three transports
 src/main.js                     renderer, camera, menus, game loop
 src/{input,hud,audio,models,settings}.js
 assets/                         compressed models + extracted track data
+vendor/three, vendor/peerjs     the only two libraries, both vendored
 tools/                          asset pipeline and tests (not shipped)
 ```
 
@@ -150,14 +156,18 @@ node  tools/verify_track.mjs       # shipped tracks vs physics data - run this!
 node  tools/check_ride_height.mjs  # gap between each car and the road
 node  tools/check_wheels.mjs       # four wheels per car, and proof they turn
 node  tools/check_steering.mjs     # does it steer, and does the field weave?
+node  tools/check_racing.mjs       # how hard is it actually to overtake?
+node  tools/check_netplay.mjs      # host and guest agree, at four latencies
+node  tools/check_twoplayer.mjs    # two real tabs through the real menus
 node  tools/shots.mjs              # drive the real game in headless Chrome
 node  tools/shots_tracks.mjs       # ... on every circuit
 ```
 
 `tools/simulate.mjs` runs the actual `Track`/`Car`/`Driver`/`Race` code with no
-renderer and asserts that every car completes the right number of laps, nobody
-leaves the racing surface, overtakes happen, and each difficulty lands where it
-should. `tools/smoke.html` checks every asset loads and each car normalises to
+renderer - every handling model against every circuit at every difficulty, plus
+a two-player grid - and asserts that every car completes the right number of
+laps, nobody leaves the racing surface, overtakes happen, and each difficulty
+lands where it should. Easy has to be a win on all of them. `tools/smoke.html` checks every asset loads and each car normalises to
 its real-world size.
 
 ## Credits
