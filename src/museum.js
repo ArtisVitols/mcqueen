@@ -1,0 +1,204 @@
+import * as THREE from 'three';
+
+/**
+ * The showroom.
+ *
+ * A place to just look at the cars: one on a lit plinth, drag to turn it,
+ * pinch to zoom, tap through the field.
+ *
+ * It borrows the game's scene and renderer rather than building its own. That
+ * is not only thrift - **McQueen is a skinned mesh, and a skinned mesh binds
+ * to the world matrix it had when it loaded**, so lifting the cars into a
+ * scratch scene is exactly the trap `CLAUDE.md` warns about. Instead the
+ * circuit is hidden, a room is switched on around the same cars, and
+ * everything is put back on the way out.
+ */
+
+const PLINTH_R = 3.4;
+const MIN_DIST = 3.2;         // how close a pinch may get
+const MAX_DIST = 12;
+const MIN_PITCH = 0.04;       // radians above the floor
+const MAX_PITCH = 1.15;       // ... and short of straight down
+const SPIN = 0.12;            // idle turntable, rad/s
+
+export class Museum {
+  /**
+   * @param {THREE.Scene} scene    the game's scene
+   * @param {THREE.Camera} camera  ... and its camera
+   */
+  constructor(scene, camera) {
+    this.scene = scene;
+    this.camera = camera;
+    this.group = this.build();
+    this.group.visible = false;
+    scene.add(this.group);
+
+    this.car = null;
+    this.yaw = Math.PI * 0.22;
+    this.pitch = 0.30;
+    this.dist = 7.4;
+    this.spin = true;              // turns by itself until you touch it
+    this.saved = null;
+    this._aim = new THREE.Vector3(0, 0.55, 0);
+  }
+
+  /** The room: a floor, a plinth, a backdrop and some showroom lighting. */
+  build() {
+    const g = new THREE.Group();
+    g.name = 'museum';
+
+    // A dark polished floor. Big enough that its edge is never in shot.
+    const floor = new THREE.Mesh(
+      new THREE.CircleGeometry(60, 64),
+      new THREE.MeshStandardMaterial({ color: 0x0d1017, roughness: 0.35, metalness: 0.5 }),
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    g.add(floor);
+
+    // The plinth, with a bright rim so the car reads against the dark floor.
+    const plinth = new THREE.Mesh(
+      new THREE.CylinderGeometry(PLINTH_R, PLINTH_R + 0.18, 0.22, 64),
+      new THREE.MeshStandardMaterial({ color: 0x1b2130, roughness: 0.5, metalness: 0.35 }),
+    );
+    plinth.position.y = -0.11;          // top face flush with y = 0
+    plinth.receiveShadow = true;
+    g.add(plinth);
+
+    const rim = new THREE.Mesh(
+      new THREE.RingGeometry(PLINTH_R - 0.06, PLINTH_R + 0.02, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffd66b, side: THREE.DoubleSide,
+                                    transparent: true, opacity: 0.55 }),
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.y = 0.012;
+    g.add(rim);
+
+    // A curved backdrop, lit from below, so there is no horizon line and the
+    // room reads as a room rather than a plane in the void.
+    const wall = new THREE.Mesh(
+      new THREE.CylinderGeometry(26, 26, 26, 48, 1, true),
+      new THREE.MeshStandardMaterial({
+        color: 0x151b28, roughness: 0.9, metalness: 0.0, side: THREE.BackSide,
+      }),
+    );
+    wall.position.y = 12;
+    g.add(wall);
+
+    // Three-point-ish lighting: a key from the front quarter, a cool rim from
+    // behind to pick out the roofline, and a soft fill so the shadowed side is
+    // not black.
+    const key = new THREE.SpotLight(0xfff4e2, 260, 30, 0.62, 0.45, 1.6);
+    key.position.set(5.5, 8.5, 6.5);
+    key.target.position.set(0, 0.5, 0);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    // A generous normal bias: the plinth is a wide flat disc lit from a sharp
+    // angle, which is the classic recipe for shadow acne - it showed up as
+    // radial banding following the cylinder's triangulation.
+    key.shadow.bias = -0.0015;
+    key.shadow.normalBias = 0.35;
+    key.shadow.camera.near = 1;
+    key.shadow.camera.far = 40;
+    g.add(key, key.target);
+
+    const rimLight = new THREE.SpotLight(0x9dc6ff, 150, 30, 0.7, 0.6, 1.6);
+    rimLight.position.set(-6, 6, -7.5);
+    rimLight.target.position.set(0, 0.6, 0);
+    g.add(rimLight, rimLight.target);
+
+    const fill = new THREE.PointLight(0xffd9a8, 40, 24, 1.8);
+    fill.position.set(-4.5, 2.4, 5);
+    g.add(fill);
+
+    g.add(new THREE.HemisphereLight(0x4a5878, 0x0a0c11, 0.55));
+    return g;
+  }
+
+  /**
+   * Switch the room on.
+   *
+   * The circuit, the sky and the fog all belong to the race; they are put
+   * aside here and restored by `close()` exactly as they were.
+   */
+  open(trackScene) {
+    this.saved = {
+      track: trackScene ? trackScene.visible : null,
+      background: this.scene.background,
+      fog: this.scene.fog,
+      fov: this.camera.fov,
+      up: this.camera.up.clone(),
+    };
+    if (trackScene) trackScene.visible = false;
+    this.trackScene = trackScene;
+    this.scene.background = new THREE.Color(0x090c12);
+    this.scene.fog = new THREE.FogExp2(0x090c12, 0.022);
+    this.camera.fov = 42;
+    this.camera.up.set(0, 1, 0);
+    this.camera.updateProjectionMatrix();
+    this.group.visible = true;
+  }
+
+  close() {
+    if (!this.saved) return;
+    if (this.trackScene) this.trackScene.visible = this.saved.track;
+    this.scene.background = this.saved.background;
+    this.scene.fog = this.saved.fog;
+    this.camera.fov = this.saved.fov;
+    this.camera.up.copy(this.saved.up);
+    this.camera.updateProjectionMatrix();
+    this.group.visible = false;
+    if (this.car) this.car.visible = false;
+    this.car = null;
+    this.saved = null;
+  }
+
+  /**
+   * Put a car on the plinth.
+   * @param {THREE.Object3D} object  a pivot from loadCar, already in the scene
+   */
+  show(object, size = null) {
+    if (this.car === object) return;
+    if (this.car) this.car.visible = false;
+    this.car = object;
+    object.visible = true;
+    object.position.set(0, 0, 0);
+    object.quaternion.identity();
+    object.rotation.y = 0;
+    this.spin = true;
+    // Frame to the car rather than to a fixed distance: Mater is a metre
+    // longer and half a metre taller than McQueen, and one distance either
+    // crops him or leaves the low cars tiny.
+    if (size) {
+      const reach = Math.max(size.x, size.z, size.y * 1.6);
+      this.dist = THREE.MathUtils.clamp(reach * 1.55, MIN_DIST, MAX_DIST);
+      this._aim.y = Math.max(0.45, size.y * 0.45);
+    }
+  }
+
+  /** One finger: turn the car. Two: pinch to zoom. */
+  drag(dx, dy) {
+    this.spin = false;
+    this.yaw -= dx * 0.008;
+    this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.006, MIN_PITCH, MAX_PITCH);
+  }
+
+  pinch(scale) {
+    this.spin = false;
+    this.dist = THREE.MathUtils.clamp(this.dist / scale, MIN_DIST, MAX_DIST);
+  }
+
+  update(dt) {
+    if (!this.saved) return;
+    // Left alone it turns slowly, so the showroom is never a still image.
+    if (this.spin) this.yaw += SPIN * dt;
+
+    const cp = Math.cos(this.pitch);
+    this.camera.position.set(
+      Math.sin(this.yaw) * cp * this.dist,
+      Math.sin(this.pitch) * this.dist + 0.55,
+      Math.cos(this.yaw) * cp * this.dist,
+    );
+    this.camera.lookAt(this._aim);
+  }
+}

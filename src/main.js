@@ -10,6 +10,7 @@ import { QUALITY, DIFFICULTY, LAP_CHOICES } from './settings.js';
 import { PHYSICS, driverAid } from './physics.js';
 import { MSG, RemoteInput, packButtons, snapshot, SNAPSHOT_HZ, INPUT_HZ } from './net.js';
 import { GuestView } from './net/guest.js';
+import { Museum } from './museum.js';
 
 const dom = (id) => document.getElementById(id);
 
@@ -189,6 +190,7 @@ class Game {
   buildMenu() {
     dom('btn-start').onclick = () => this.startRace();
     dom('btn-two').onclick = () => this.showTwoPlayer();
+    dom('btn-museum').onclick = () => this.openMuseum();
     dom('btn-options').onclick = () => this.showOptions();
     dom('btn-back').onclick = () => {
       Settings.save(this.settings);
@@ -517,6 +519,118 @@ class Game {
     this.net = null;
     this.toMenu();
     dom('menu-track').textContent = 'The other player left the race';
+  }
+
+  // --------------------------------------------------------------- museum
+
+  /**
+   * Gestures for the showroom, on the canvas rather than a control.
+   *
+   * Written against pointer events for the same reason `Input` is: the whole
+   * screen is the exhibit, two fingers have to work at once, and a finger
+   * sliding off nothing should not strand a gesture.
+   */
+  bindMuseumTouch() {
+    const el = this.canvas;
+    const active = new Map();
+    let pinch = 0;
+
+    const spread = () => {
+      const [a, b] = [...active.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+
+    el.addEventListener('pointerdown', (e) => {
+      if (!this.museum?.saved) return;
+      el.setPointerCapture?.(e.pointerId);
+      active.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (active.size === 2) pinch = spread();
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!this.museum?.saved || !active.has(e.pointerId)) return;
+      const p = active.get(e.pointerId);
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (active.size >= 2) {
+        const now = spread();
+        if (pinch > 0 && now > 0) this.museum.pinch(now / pinch);
+        pinch = now;
+      } else {
+        this.museum.drag(dx, dy);
+      }
+    });
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+      el.addEventListener(type, (e) => {
+        active.delete(e.pointerId);
+        if (active.size < 2) pinch = 0;
+      });
+    }
+    // Desktop, for testing and for anybody on a laptop.
+    el.addEventListener('wheel', (e) => {
+      if (!this.museum?.saved) return;
+      e.preventDefault();
+      this.museum.pinch(e.deltaY > 0 ? 0.92 : 1.087);
+    }, { passive: false });
+
+    dom('mus-prev').onclick = () => this.museumStep(-1);
+    dom('mus-next').onclick = () => this.museumStep(1);
+    dom('mus-back').onclick = () => this.closeMuseum();
+  }
+
+  openMuseum() {
+    cancelAnimationFrame(this.raf);
+    this.museum = this.museum || new Museum(this.scene, this.camera);
+    if (!this._museumBound) { this.bindMuseumTouch(); this._museumBound = true; }
+
+    for (const [, m] of this.models) m.object.visible = false;
+    dom('menu').classList.add('hidden');
+    dom('museum').classList.remove('hidden');
+
+    this.museum.open(this.trackScene);
+    this.museumAt = Math.max(0, this.carSpecs.findIndex((c) => c.id === this.settings.car));
+    this.museumShow();
+
+    let last = performance.now();
+    const tick = (now) => {
+      if (!this.museum?.saved) return;
+      this.raf = requestAnimationFrame(tick);
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      this.museum.update(dt);
+      // The wheels turn with the car so a parked exhibit is not a still life.
+      const car = this.carSpecs[this.museumAt];
+      this.models.get(car.id)?.object.userData.wheels?.update(
+        { speed: 0, steerAngle: 0, steer: 0, accelLat: 0, accelLong: 0 }, dt);
+      this.renderer.render(this.scene, this.camera);
+    };
+    this.raf = requestAnimationFrame(tick);
+  }
+
+  museumStep(by) {
+    const n = this.carSpecs.length;
+    this.museumAt = (this.museumAt + by + n) % n;
+    this.museumShow();
+  }
+
+  museumShow() {
+    const spec = this.carSpecs[this.museumAt];
+    const model = this.models.get(spec.id);
+    if (!model) return;
+    this.museum.show(model.object, model.size);
+    dom('mus-title').textContent = spec.name;
+    const chip = dom('mus-number');
+    chip.textContent = spec.number;
+    chip.style.background = spec.colour;
+  }
+
+  closeMuseum() {
+    cancelAnimationFrame(this.raf);
+    this.museum.close();
+    dom('museum').classList.add('hidden');
+    dom('menu').classList.remove('hidden');
+    this.startIdleCamera();
   }
 
   applyQuality() {

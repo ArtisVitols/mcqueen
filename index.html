@@ -8,13 +8,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>McQueen Speedway</title>
-<link rel="stylesheet" href="styles.css?v=20260801-1504-85b5d1e">
+<link rel="stylesheet" href="styles.css?v=20260801-1522-68f6b86">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>">
 <!-- Stamped by tools/stamp_version.py on every deploy. GitHub Pages serves
      everything with max-age=600, so without this a phone can hold a new
      track-data.json alongside the previous track.glb for ten minutes - which
      is exactly how you end up with cars floating over a flattened road. -->
-<script>window.__BUILD__ = '20260801-1504-85b5d1e';</script>
+<script>window.__BUILD__ = '20260801-1522-68f6b86';</script>
 <script type="importmap">
 {
   "imports": {
@@ -43,6 +43,7 @@
   <div class="menu-buttons">
     <button id="btn-start" class="big">START</button>
     <button id="btn-two" class="big ghost">2 PLAYERS</button>
+    <button id="btn-museum" class="big ghost">MUSEUM</button>
     <button id="btn-options" class="big ghost">OPTIONS</button>
   </div>
   <!-- So "am I actually on the new version?" is answerable at a glance. -->
@@ -119,6 +120,22 @@
   </div>
 </div>
 
+<!-- museum ------------------------------------------------------------------ -->
+<div id="museum" class="hidden">
+  <div class="mus-bar">
+    <button id="mus-prev" class="mus-arrow" aria-label="Previous car">◀</button>
+    <div class="mus-name">
+      <span id="mus-number" class="chip"></span>
+      <span id="mus-title"></span>
+    </div>
+    <button id="mus-next" class="mus-arrow" aria-label="Next car">▶</button>
+  </div>
+  <div class="mus-foot">
+    <p class="mus-hint">Drag to turn &middot; pinch to zoom</p>
+    <button id="mus-back" class="big ghost">BACK</button>
+  </div>
+</div>
+
 <!-- heads-up display ------------------------------------------------------ -->
 <div id="hud" class="hidden">
   <div class="hud-box hud-lap">
@@ -178,6 +195,6 @@
   </div>
 </div>
 
-<script type="module" src="src/main.js?v=20260801-1504-85b5d1e"></script>
+<script type="module" src="src/main.js?v=20260801-1522-68f6b86"></script>
 </body>
 </html>

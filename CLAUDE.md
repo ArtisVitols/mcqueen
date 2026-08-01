@@ -256,6 +256,28 @@ speed, steers the front pair and leans the body. Nothing re-exports a GLB -
   it is 40% too tall, and `check_ride_height` reported every car 17 cm into the
   road when nothing had moved. Same flag McQueen already needed.
 
+## The museum
+
+**MUSEUM** on the main menu: a car on a lit plinth, drag to turn, pinch to
+zoom, arrows to step through the field. `src/museum.js`.
+
+- **It borrows the game's scene, camera, fog and background rather than making
+  its own.** McQueen is skinned and binds to the world matrix he had at load,
+  so lifting the cars into a scratch scene is the trap the skinning note
+  warns about. The circuit is hidden, a room is switched on around the same
+  cars, and `close()` puts every borrowed thing back - which is why
+  `check_museum.mjs` spends half its length racing *after* a visit.
+- **Only the controls may take a touch.** `#museum > * { pointer-events: auto }`
+  is an ID selector and beats `.mus-hint { pointer-events: none }`, so the
+  "drag to turn" caption sat in the middle of the screen and swallowed the one
+  gesture it was describing. Enable the controls by name instead.
+- Framing comes from each car's measured size. Mater is a metre longer and
+  half a metre taller than McQueen; one fixed distance either crops him or
+  leaves the low cars tiny.
+- A wide flat plinth lit from a sharp angle is the classic recipe for shadow
+  acne - it showed as radial banding following the cylinder's triangulation,
+  and wants a much bigger `normalBias` than the outdoor sun does.
+
 ## Two players, two devices
 
 **2 PLAYERS** on the main menu; START is still single-player and unchanged.
@@ -513,6 +535,7 @@ node tools/check_barriers.mjs      # walls inside the corridor, holes under the 
 node tools/check_wheels.mjs        # 4 wheels per car, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
+node tools/check_museum.mjs        # every car on the plinth, and the race after
 node tools/check_netplay.mjs       # host and guest agree, at four latencies
 node tools/check_twoplayer.mjs     # two real tabs through the real menus
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
@@ -552,7 +575,11 @@ What "good" looks like right now:
   every difficulty an identical six passes and hid the thing being measured.
   Passes alone are ambiguous too: zero means both "dominant, nobody left to
   pass" and "cannot get by". The conversion rate separates them. Today:
-  Normal converts 43–86%, Hard 0–42% from two to three times as many duels.
+  Normal converts 78–88% with nobody taking a place back; Hard converts 18–47%
+  from three to four times as many duels and takes 5–12 places back. The shape
+  is only asserted for the models with a driver aid: Pro has none, so the
+  "player" there is a scripted driver whose own quality would dominate the
+  numbers, and all that is required of it is that the field is reachable.
 - `check_steering.mjs` — every model at every difficulty moves the car at
   1.5 m/s or more across the road at full lock and settles when released, and
   the field weaves less than six times a lap **on the straights**. Counting

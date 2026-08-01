@@ -21,6 +21,12 @@ tap 2 PLAYERS instead - see below.
 - The wheels turn at road speed, the front pair steers, and the body leans into
   the corners and noses down under braking.
 
+## The museum
+
+**MUSEUM** on the menu opens a showroom: each car on a lit plinth, turning
+slowly. Drag to spin it round, pinch to zoom, and use the arrows to step
+through all seven.
+
 ## Two players
 
 **2 PLAYERS** on the menu. One of you taps HOST and reads out the four-letter
@@ -45,7 +51,7 @@ on track drives whichever you choose.
 |---|---|
 | **Arcade** | The default. Hold the gas and the car follows the track; cornering costs nothing and you cannot spin. Built for a five-year-old. |
 | **Sport** | Real grip. Carry too much speed in and the car washes wide with the tyres howling; the high line grips, the low line is shorter. Still cannot spin. |
-| **Pro** | The rear steps out under power and you have to catch it. You *can* spin — though never so badly that you end up parked facing a wall. |
+| **Pro** | **No assists at all.** Nothing brakes for the corner, nothing holds your lane, and the steering rack is fixed - full lock at 250 km/h asks for far more grip than the tyres have, and the car will let you. You have to drive it. |
 
 Sport and Pro add a six-speed gearbox, so the engine steps through the ratios
 and the gear shows under the speed.
@@ -157,6 +163,7 @@ node  tools/check_ride_height.mjs  # gap between each car and the road
 node  tools/check_wheels.mjs       # four wheels per car, and proof they turn
 node  tools/check_steering.mjs     # does it steer, and does the field weave?
 node  tools/check_racing.mjs       # how hard is it actually to overtake?
+node  tools/check_museum.mjs       # every car on the plinth, and the race after
 node  tools/check_netplay.mjs      # host and guest agree, at four latencies
 node  tools/check_twoplayer.mjs    # two real tabs through the real menus
 node  tools/shots.mjs              # drive the real game in headless Chrome

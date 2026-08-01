@@ -7,9 +7,15 @@
  * "on Normal I can pass them easily, on Hard it should be a real fight", and
  * without them that is a matter of opinion.
  *
- * The player holds the throttle down and does not steer, which is both the
- * five-year-old's technique and the only way to compare difficulties without
- * a driver in the loop.
+ * Under a model with a driver aid the player holds the throttle down and does
+ * not steer, which is both the five-year-old's technique and the only way to
+ * compare difficulties without a driver in the loop.
+ *
+ * Under one without - Pro - that is not a driver at all: the car has nothing
+ * holding a lane and nothing lifting for the corners, so it trails the field
+ * and never gets near anybody, and the numbers measure the instrument rather
+ * than the racing. There the player is a *competent* driver instead: it holds
+ * the racing line and lifts for the corner, which is who that model is for.
  *
  * The opening lap does not count. The player starts at the back and goes by
  * most of the field while everyone is still accelerating off the grid, which
@@ -25,7 +31,7 @@ import * as THREE from 'three';
 
 import { Track } from '../src/track.js';
 import { Race, State } from '../src/race.js';
-import { PHYSICS } from '../src/physics.js';
+import { PHYSICS, laneSteer } from '../src/physics.js';
 import { DIFFICULTY } from '../src/settings.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -47,6 +53,37 @@ const FLAT_OUT = {
     car.brake = 0;
   },
 };
+
+/**
+ * Somebody who can actually drive: holds a lane, lifts for the corner.
+ *
+ * Deliberately no better than that - no racing line optimisation and no
+ * overtaking of its own - so what it measures is still "how hard is it to get
+ * past these cars", not "how good is this bot".
+ */
+const LOOK = [0, 25, 55, 90];
+function competent() {
+  const st = {};
+  return {
+    applyTo(car, dt, physics) {
+      const track = car.track;
+      track.sample(car.s, st);
+      car.steer = laneSteer(car, -1.5, dt);      // just inside the racing line
+
+      let allowed = Infinity;
+      for (const ahead of LOOK) {
+        track.sample(car.s + ahead, st);
+        const limit = physics.cornerSpeed(car, st, car.n);
+        if (limit < Infinity) {
+          allowed = Math.min(allowed, Math.sqrt(limit * limit + 2 * 18 * ahead));
+        }
+      }
+      const err = allowed - car.speed;
+      car.throttle = Math.max(0, Math.min(1, 1 + err * 0.5));
+      car.brake = Math.max(0, Math.min(1, -err * 0.12));
+    },
+  };
+}
 
 function race(trackId, physics, difficulty) {
   const spec = TRACKS.find((t) => t.id === trackId);
@@ -99,8 +136,9 @@ class Duel {
 const wanted = process.argv.slice(2);
 const tracks = wanted.length ? TRACKS.filter((t) => wanted.includes(t.id)) : TRACKS;
 
-console.log(`Player holds the throttle down for ${LAPS} laps and never steers.`);
-console.log('The opening lap is not counted - that is the standing start, not racing.');
+console.log(`Five laps. Under a model with a driver aid the player just holds the`);
+console.log('throttle; under one without, they drive properly - see the note in the');
+console.log('file. The opening lap is not counted: that is the standing start.');
 console.log('"duels" is how often they drew alongside anybody, "passed" how many of');
 console.log('those they converted, "lost" places taken back, "took" the mean seconds');
 console.log('from alongside to clear ahead. The conversion rate is the real answer to');
@@ -116,11 +154,13 @@ for (const spec of tracks) {
     for (const difficulty of Object.keys(DIFFICULTY)) {
       const r = race(spec.id, physics, difficulty);
       const player = r.player;
+      const driver = PHYSICS[physics].assisted || physics === 'arcade'
+        ? FLAT_OUT : competent();
       const duels = new Map(r.field.filter((c) => c !== player).map((c) => [c, new Duel()]));
       let t = 0;
       let fightPeak = 0;
       while (r.state !== State.FINISHED && t < 1200) {
-        r.update(DT, FLAT_OUT);
+        r.update(DT, driver);
         t += DT;
         if (player.lap > 1) {
           for (const [rival, duel] of duels) duel.step(player.progress - rival.progress, t);
@@ -181,7 +221,22 @@ for (const physics of Object.keys(PHYSICS)) {
     console.log(`  ! ${physics}: Easy took ${e.lost} place(s) back off the player`);
     failed++;
   }
-  // Hard: rivals hold on to places and take them back.
+
+  // The shape of the difficulty curve is only asserted for the models with a
+  // driver aid, where the player is a fixed, dumb, comparable thing. Pro has
+  // no aid, so the "player" here is a scripted driver, and its own quality
+  // then dominates the numbers - a conversion rate would be measuring the bot,
+  // not the game. What is required of Pro is that the field is reachable at
+  // all; how hard it is to pass them is a question for a person.
+  if (!(PHYSICS[physics].assisted || physics === 'arcade')) {
+    if (n.entries + h.entries < 6) {
+      console.log(`  ! ${physics}: the field is out of reach ` +
+                  `(${n.entries} duels on Normal, ${h.entries} on Hard)`);
+      failed++;
+    }
+    continue;
+  }
+
   // Hard has to be a race you can join - somebody to fight - and one where
   // fewer of those fights come off than on Normal.
   if (h.entries < 4) {
@@ -193,9 +248,7 @@ for (const physics of Object.keys(PHYSICS)) {
                 `(${(h.rate * 100).toFixed(0)}% vs ${(n.rate * 100).toFixed(0)}%)`);
     failed++;
   }
-  // ... and one where a place, once taken, has to be held. Unless the player
-  // never got past anybody at all, in which case there was nothing to take
-  // back and Hard is doing its job the hard way.
+  // ... and one where a place, once taken, has to be held.
   if (h.passed > 0 && h.lost < 1) {
     console.log(`  ! ${physics}: Hard never takes a place back off the player`);
     failed++;
