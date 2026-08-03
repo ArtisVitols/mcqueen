@@ -170,16 +170,29 @@ is the old code moved verbatim, so its race pacing is unchanged and the
 
 ## Rivals that fight back
 
-`Driver.fight` is a grudge, 0..1: it jumps when a *human* passes within 25 m,
-buys that driver pace, corner commitment, a better tow and more appetite for a
-move, and halves every 8 seconds. `tuning.defend` is separate - how far they
+`Driver.fight` is 0..1 and the rule is one line: **a rival chases while a
+human is ahead of it.** It winds up over a second and a half, buys that driver
+pace, corner commitment, a better tow and more appetite for a move, and winds
+down again once it is back in front. `tuning.defend` is separate - how far they
 will move to cover the inside line before you commit. Both are per-difficulty.
 
-- **The rubber band has to stand down for a car with a grudge.** `rubberBand`
-  reels in any AI that gets ahead, which is precisely the car trying to come
-  back at you, so `Race.rubberBand` scales its reeling-in by `1 - car.fight`.
-  Take the handicap off for ten seconds, then fade it back in: that *is* the
-  "they get harder, then they get weaker again" the owner asked for.
+- **Sustained, not a timer.** It used to be "for ten seconds after being
+  passed", which faded whether or not you were still ahead: get by the whole
+  field and they all quietly gave up and you cruised to the flag unopposed.
+  Being ahead of them is what switches it off, so passing everybody switches
+  everybody on.
+- **The floor belongs to the decay, not the rise.** `if (fight < 0.01) fight = 0`
+  applied to a value winding *up* eats the first increment of every step -
+  which is smaller than the floor - and the grudge never leaves zero. It cost
+  an hour of looking at a chase that was correctly computed and never applied.
+- **Hard's chase pace is a fraction of the player's own limiter.** 1.10 lands
+  about 20 km/h above what the player actually reaches once drag is paid,
+  which is enough to hunt a leader down and not enough to drive away.
+- **The rubber band has to stand down for a car that is chasing.** `rubberBand`
+  reels in any AI that gets ahead, which is precisely the car coming back at
+  you, so `Race.rubberBand` scales its reeling-in by `1 - car.fight`. The
+  handicap comes off while they hunt and returns once they are past you, which
+  *is* the "they get harder, then they get weaker again" the owner asked for.
 - **A car directly behind the one that just passed it can never be closing**,
   because the same AI lifts rather than driving through the back of anybody. So
   requiring closing speed before attempting a move locked a rival into second
@@ -575,8 +588,8 @@ What "good" looks like right now:
   every difficulty an identical six passes and hid the thing being measured.
   Passes alone are ambiguous too: zero means both "dominant, nobody left to
   pass" and "cannot get by". The conversion rate separates them. Today:
-  Normal converts 78–88% with nobody taking a place back; Hard converts 18–47%
-  from three to four times as many duels and takes 5–12 places back. The shape
+  Normal converts 78–88% with nobody taking a place back; Hard converts 10–38%
+  from three to five times as many duels and takes 5–8 places back. The shape
   is only asserted for the models with a driver aid: Pro has none, so the
   "player" there is a scripted driver whose own quality would dominate the
   numbers, and all that is required of it is that the field is reachable.

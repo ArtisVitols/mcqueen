@@ -13,8 +13,8 @@ tap 2 PLAYERS instead - see below.
 
 - Left thumb: ◀ ▶ steer. Right thumb: ▲ gas, ▼ brake.
 - Five red lights, then green, then three laps. Lap counter is top right.
-- OPTIONS sets your car, the circuit, handling, laps (1/3/5), difficulty,
-  graphics quality and sound.
+- OPTIONS sets your car, the circuit, handling, laps (2/5/10/15/20),
+  difficulty, graphics quality and sound.
 - Difficulty is **Easy** by default: holding the throttle down is enough to
   win, whichever handling model is picked. Normal is close, Hard beats a
   flat-out player.

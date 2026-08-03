@@ -16,14 +16,19 @@ const DRAFT_RANGE = 34;
 const CAR_LENGTH = 5;
 const PASS_GAP = 3.4;       // how far beside the car being passed to aim
 
-// Being overtaken by a human. `fight` is a grudge: it rises the moment they
-// get by and decays over the next ten seconds or so, and while it is up this
-// driver has more pace, more corner speed and more appetite for a move. It is
-// deliberately a *duel* with the car that just passed - Race.rubberBand
-// remains the global "keep the pack catchable" control, and the two do
-// different jobs.
-const FIGHT_RANGE = 25;     // metres; closer than this and a pass is personal
-const FIGHT_FORGET = 60;    // ... and past this they give up and settle down
+// Chasing a human. `fight` is 0..1 and it is *on while a human is ahead of
+// this car*: it winds up over a second and a half, and while it is up the
+// driver has more pace than the player has, more corner commitment, a better
+// tow and more appetite for a move. Getting back in front of them is what
+// winds it down again.
+//
+// Race.rubberBand remains the global "keep the pack catchable" control; these
+// two do different jobs and the band stands down for a car that is chasing.
+// How far ahead a human can be and still be worth chasing. Generous, because
+// the point is that they *do* catch you: at 60 m a leader simply drove out of
+// range and everybody relaxed.
+const FIGHT_FORGET = 240;
+const FIGHT_RISE = 1.5;     // seconds to wind up to full chase
 // Seconds for the grudge to halve. Per-difficulty, because how long a rival
 // stays angry is as much of a dial as how fast it goes when it is: a short
 // grudge means they attack, fade, and you cruise away from them.
@@ -57,42 +62,49 @@ export class Driver {
     this.rng = rng;
     this.commit = 0;          // seconds left on the current overtake
     this.cool = 0;            // ... and before another may be started
-    this.fight = 0;           // 0..1 grudge against whoever just passed
+    this.fight = 0;           // 0..1, how hard it is chasing a human
     this.defend = 0;          // seconds left holding a covered line
     this.defendCool = 0;
-    this.rel = new Map();     // human car -> where they were, to spot a pass
     this.wander = rng() * Math.PI * 2;
   }
 
   /**
-   * Watch the humans go by.
+   * Am I behind a human right now?
    *
-   * A pass is a change of sign in "how far ahead of me are they", close
-   * enough that it happened here rather than a straight away. Only humans
-   * count: an AI holding a grudge against another AI is churn nobody sees,
-   * and the point of this is to make *your* race harder.
+   * Only humans count: an AI chasing another AI is churn nobody sees, and the
+   * point of this is to make *your* race harder.
    */
   updateFight(dt, field, tuning) {
     const car = this.car;
+    let chasing = false;
     let nearest = Infinity;
 
     for (const other of field) {
       if (!other.isPlayer || other.finished) continue;
       const gap = other.progress - car.progress;      // positive: they are ahead
-      const was = this.rel.get(other);
-      this.rel.set(other, gap);
-      nearest = Math.min(nearest, Math.abs(gap));
-      if (was === undefined) continue;
-      if (was < 0 && gap >= 0 && Math.abs(gap) < FIGHT_RANGE) {
-        this.fight = Math.min(1, this.fight + (tuning.fight ?? 0));
-      }
+      if (Math.abs(gap) < nearest) nearest = Math.abs(gap);
+      // Behind them, and close enough that catching up is a real prospect.
+      if (gap > 0 && gap < FIGHT_FORGET) chasing = true;
     }
 
-    this.fight *= Math.pow(0.5, dt / (tuning.grudge ?? FIGHT_HALFLIFE));
-    // Out of reach, so stop chasing. Without this a driver hounds a player who
-    // is half a lap up, which is neither realistic nor any fun to be behind.
-    if (nearest > FIGHT_FORGET) this.fight = 0;
-    if (this.fight < 0.01) this.fight = 0;
+    // The whole rule, and it is deliberately this simple: **chase while a
+    // human is ahead of you.** Not "for ten seconds after being passed" -
+    // that faded whether or not you were still in front, so once you were by
+    // everybody the field quietly gave up and you cruised away unopposed.
+    //
+    // Being ahead of them is what switches it off again, which is exactly the
+    // shape the owner asked for: pass the lot, they come after you; one of
+    // them gets by, that one settles down.
+    const ceiling = tuning.fight ?? 0;
+    if (chasing && nearest < FIGHT_FORGET) {
+      this.fight += (ceiling - this.fight) * Math.min(1, dt / FIGHT_RISE);
+    } else {
+      this.fight *= Math.pow(0.5, dt / (tuning.grudge ?? FIGHT_HALFLIFE));
+      // Snap the tail to zero, but only on the way *down*. Applied to a value
+      // that is winding up, this floor eats the first increment of every step
+      // - which is smaller than the floor - and the grudge never leaves zero.
+      if (this.fight < 0.01) this.fight = 0;
+    }
     // Race.rubberBand reads this off the car. Without it the handicap that
     // keeps the pack catchable would reel in the one car that is trying to
     // come back at you, which is the opposite of the point.
@@ -211,10 +223,11 @@ export class Driver {
     car.steer = laneSteer(car, target, dt, committed ? COMMITTED_CLOSE : null);
 
     // --- throttle ---------------------------------------------------------
-    // Pace is the difficulty's cruising figure until somebody passes this
-    // driver, and its chasing figure for the ten seconds afterwards. On Hard
-    // that is the whole difference between the two settings: you catch them at
-    // Normal's pace, and once you are by they show you what Hard means.
+    // Pace is the difficulty's cruising figure while this driver is ahead of
+    // you, and its chasing figure while it is behind you. On Hard that is the
+    // whole difference between the two settings: you catch them at Normal's
+    // pace, and the moment you are by they find about 20 km/h more than you
+    // have and come and take it back.
     //
     // `baseSpeed` carries the rubber band and nothing else; the pace figure is
     // applied here so the grudge can move it. `topSpeed` is only the limiter.

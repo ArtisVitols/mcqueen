@@ -3,7 +3,7 @@ const KEY = 'mcqueen-speedway';
 const DEFAULTS = {
   car: 'lightning_mcqueen',
   track: 'msots',
-  laps: 3,
+  laps: 5,
   quality: 'high',
   difficulty: 'easy',
   physics: 'arcade',
@@ -55,8 +55,11 @@ export const DIFFICULTY = {
     assist: 1.0, lift: 0, fight: 1.0, defend: 1.0,
     // Cruises at Normal's pace so you can catch them and get by...
     aiSpeed: 0.95, aiCorner: 0.92,
-    // ... and then comes after you properly.
-    chaseSpeed: 1.12, chaseCorner: 1.10,
+    // ... and then comes after you properly. This is a fraction of the same
+    // base the player is limited to, and 1.10 lands about 20 km/h above what
+    // they actually reach on track once drag is paid - enough to hunt a leader
+    // down without being able to drive away from them.
+    chaseSpeed: 1.10, chaseCorner: 1.10,
   },
 };
 
@@ -65,7 +68,7 @@ export const QUALITY = {
   high: { label: 'High', shadows: true, pixelRatio: 2, fog: 900, aniso: 4 },
 };
 
-export const LAP_CHOICES = [1, 3, 5];
+export const LAP_CHOICES = [2, 5, 10, 15, 20];
 
 export function load() {
   try {
