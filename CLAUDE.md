@@ -40,6 +40,15 @@ realistic when they conflict.
   `protocolTimeout` raised; don't tighten either.
 - `tools/browser.py` drives Firefox via geckodriver for non-WebGL pages
   (the smoke test). Fine for DOM work, useless for rendering.
+- **Raycasting a whole circuit needs `tools/chunk.js` first.** Yoyleland's
+  catch fence, grandstands and concrete each *ring the stadium* - 180k to 230k
+  triangles apiece with a bounding box covering everything - so three.js
+  rejects nothing and every ray brute-forces the lot. `refine_track` fires
+  ~400,000 of them: hours became four minutes, and `check_barriers` twenty
+  minutes became thirty seconds. Chunking gives each piece a tight box; the
+  boxes are accumulated by hand because `computeBoundingBox()` measures the
+  whole position attribute rather than the triangles a chunk indexes, which
+  would reproduce the bug exactly.
 - **Never `pkill -f "http.server 8099"`.** The pattern matches the shell's own
   command line and kills the session. Use a fresh port instead; the tools each
   pick their own.
@@ -247,10 +256,20 @@ appearing at both ends.
 speed, steers the front pair and leans the body. Nothing re-exports a GLB -
 `optimize.sh` is the most trap-laden part of this repo and is left alone.
 
-- None of the models ship usable wheel nodes. Six are Sketchfab OBJ exports
-  merged **by material**, so all four wheels sit in one mesh; McQueen is skinned
-  with a 3ds Max biped whose `Bip01_wheel_*` bones are already right. Hence two
-  routes, `fromSplit` and `fromBones`.
+- None of the models ship usable wheel nodes. Most are Sketchfab OBJ exports
+  merged **by material**, so all the wheels sit in one mesh; McQueen and Guido
+  are skinned, with bones already in the right places. Hence two routes,
+  `fromSplit` and `fromBones`.
+- **The count is not four.** Guido is a three-wheeled forklift and Mack a
+  ten-wheeled artic, so both routes accept 3..12 and only the *frontmost axle*
+  steers - a midpoint test would have Mack steering with his drive axles and
+  half his trailer.
+- **A bone name ends with `(_|$)`, never `\b`.** These names carry a numeric
+  suffix (`Bip01_wheel_front_L_050`), and `\b` between the `R` and the `_`
+  matches nothing at all because both are word characters. Tightening the regex
+  that way silently took every wheel off the player's car and nothing else's.
+  It is also what excludes the `wheelbase_*` bones, which sit in the same
+  places and would double the count.
 - **Weld before splitting.** OBJ exports repeat each corner per face, so
   without welding every triangle is its own island.
 - **Give each wheel a compact geometry.** Sharing the vertex buffer and handing
@@ -286,10 +305,111 @@ zoom, arrows to step through the field. `src/museum.js`.
   gesture it was describing. Enable the controls by name instead.
 - Framing comes from each car's measured size. Mater is a metre longer and
   half a metre taller than McQueen; one fixed distance either crops him or
-  leaves the low cars tiny.
+  leaves the low cars tiny. **The room is scaled with it** - `frame()` moves
+  the plinth, the lights and the fog, because a rig placed for a 4.4 m car sits
+  *inside* an 18 m truck and lights one wheel arch. Intensity rises with the
+  square of the distance, since the falloff is inverse-square.
+- **All nine cars are on show, including the two that never race.** Guido and
+  Mack carry `"racer": false` in `cars.json`, which keeps them off the grid and
+  out of the car picker; the showroom is for looking at cars, and they are
+  cars. Everything that builds a field uses `racerSpecs`, and the headless sim
+  tools filter the same way — a nine-car grid with an artic on it is not the
+  race any of them assert anything about.
 - A wide flat plinth lit from a sharp angle is the classic recipe for shadow
   acne - it showed as radial banding following the cylinder's triangulation,
   and wants a much bigger `normalBias` than the outdoor sun does.
+
+## Pit stops
+
+A tyre bar drains green to red; steer down to the inside as you pass the pit
+entrance and the car peels off, stops on a yellow box, and **Guido** drives
+round the four wheels before you rejoin. **Mack** is parked by the wall.
+`src/pits.js` is the geometry, `src/pitstop.js` the state machine,
+`src/pitcrew.js` the visuals, and `tools/extract_pits.mjs` builds the data.
+
+- **A pit lane cannot be "more `n`".** Track space is one ribbon and the
+  arc-length scale `1 + n·κ` degenerates a long way off the centreline, so a
+  road 90 m inboard is not somewhere the lap coordinate can reach. `PitRoad`
+  is a **second ribbon** that *extends `Track`* and inherits all of it, so
+  `Car.step` does not change: a car drives `car.road`, and `car.track` keeps
+  owning laps and race order. That split is what stops a pit stop from ever
+  becoming a lap-counting bug, exactly as the model/`Car` split stops a
+  handling change from becoming one.
+- **It has ends, so `wrap` clamps and `span` stops at the last station.**
+  Wrapping from the last station back to the first is right for a lap and
+  catastrophic for a pit lane.
+- **Progress is mapped, not accumulated.** The chord is *shorter* than the arc
+  it bypasses - 3.7% at Yoyleland - so paying out its own metres would make
+  the pit lane a shortcut. `lapAt` maps distance along the ribbon onto the
+  stretch of lap it replaces, which makes the two paths worth exactly the same
+  and leaves the cost where it belongs: the speed limit and the stop.
+- **Entry and exit are handovers, not teleports.** The ribbon's ends taper
+  onto the racing line, so the two overlap in space wherever a handover is
+  allowed; `check_pits` asserts that overlap is under a car's length.
+- **Anything measured forward of the entry must use `track.delta`.** These pit
+  roads run *through* the start/finish - Yoyleland's enters at s = 2394 of a
+  2817 m lap - so subtracting raw `s` values goes negative the moment the car
+  crosses the line and drops it back to the pit entry mid-lane.
+- **Aim at the box from the moment of entry.** `laneSteer` asks for a crossing
+  *rate*, so a car that brakes first and moves over second never moves over at
+  all: it stopped at n = +3.2 with its box at -3.4, could not steer at zero
+  speed, and sat there for the rest of the race. For the same reason the
+  STOPPED transition tests only that the car is stationary in the box, never
+  stationary *and* aligned - two conditions where the second cannot be fixed
+  once the first is true is the definition of a deadlock.
+- **The entry window is a place, not a stretch.** Allowing the first half of
+  the whole lane let a car turn in level with its own box at racing speed with
+  nowhere to brake. It is half the run to the first box, in lap metres.
+- **One stop per lap.** A car exits onto the inside lane, which is exactly
+  where the entry test is watching, so without `pitDone` the player came
+  straight back in - ten times in a twelve-lap race.
+- **The chase camera follows `car.road`.** Anchored on the circuit while the
+  car is in the pits it sits eighty metres away pointing down an empty
+  straight, and the car is simply not in shot. `separate`, `room`,
+  `clampLateral` and `coolDown` are road-aware for the same reason - two cars
+  at the same lap position on different ribbons are seventy metres apart.
+- **`arcScale` is clamped.** The expression is singular at `n·κ = -1`. An oval
+  never gets near it, but the entry taper sweeps across the infield in a short
+  distance and there a car three metres off the ribbon advanced *five metres
+  of lap in one 1/120 s step*.
+- **Worn tyres only lose grip**, fading to `0.75` through the same multiplier
+  as `car.assist` so it reaches all three models through the one function they
+  share and can introduce no discontinuity. Under Arcade the car still cannot
+  spin: a five-year-old on worn tyres is slower and never in trouble.
+- **Wear is linear in lateral load, not squared.** Squared is more realistic
+  and far too sharp - at 2.5 g it wears seven times as fast as cruising, and a
+  player at the limit burned a set every other lap. Calibration today: 5 laps
+  needs no stop, 10 laps needs one, 20 laps is a three-stopper.
+- **The AI pits too**, and **on Easy the aid steers you in** - holding the
+  throttle down has to be enough to win, and it is not if the tyres go off and
+  nobody ever comes in. Same rule that already makes the aid overtake there.
+- **The guest never predicts through a stop**, and takes the host's word for
+  where a pitting car is: `s` on the pit ribbon is a distance down a different
+  coordinate system, so easing towards it with `track.delta` would interpolate
+  between two of them.
+- Guido serves the **local player only**. Seven forklifts at once is a car
+  park, not a pit stop. His route is driven from the render loop and the stop's
+  timing does not wait on it - an animation the simulation waited on would make
+  the race depend on the frame rate, and this one renders at 1.7 fps.
+
+## Finding a pit lane in a model
+
+`tools/extract_pits.mjs`, and it is the same class of problem as the road mask.
+
+- **A pit lane shares its material with the inner apron, all the way round.**
+  Motor Speedway's `Material.107` is the pit lane along the front straight and
+  the apron everywhere else, so asking "where is 107" matched the whole lap and
+  produced a 4.8 km pit road. What separates them is **width**: the apron is
+  6-7 m, a pit lane 16-17. `pitMinWidth` is that threshold.
+- **Width alone is not enough either** - both straights of an oval have a wide
+  apron. `pitBoxMaterials` names what sits *behind* the lane (Motor Speedway's
+  `Material.100`, the pit boxes), which is the discriminator CLAUDE.md's radial
+  order already implied. Palm Mile has no such material and falls back to
+  `pitByWidth`, which is only safe because `check_pits.mjs` then has to agree
+  the result is on road, clear of walls and joined to the racing line.
+- **A pit wall is vertical, so a downward raycast passes straight over it** and
+  the two surfaces look continuous. Yoyleland's lane needs no naming at all: it
+  is 80 m of grass away and is found by shape.
 
 ## Two players, two devices
 
@@ -516,6 +636,33 @@ entry is correct; a car floating over the gap is not.
   downward raycast; the final sweep builds a fresh `Track` from the refined
   arrays. Symptom to watch for: widths pinned at `MIN_HALF` over long stretches
   of a road that verify_track says is perfectly flat.
+- **A cross-section must be walked outward from the centreline**, in both
+  directions, carrying each height as the guess for the next. Starting at one
+  edge with the *centreline's* height as the prior is fatal on a steep bank: at
+  Yoyleland's 18° the deck at the inside edge is 2.5 m below the centre, so the
+  flat apron underneath it is nearer to the guess and the ray locks onto that.
+  It reported the whole superspeedway as flat, and the final sweep then found
+  a "wall" at 1132 of 1200 stations - which was the real banking, rising
+  through a corridor that had been told it was level. The same mistake in the
+  bumper sweep produced the same 1173.
+- **Seed each station's height from the stored data, not from the previous
+  station's answer.** A running prior is only as good as its worst sample: one
+  ray that slips onto the apron hands 0.01 m to the next station and the whole
+  rest of the lap follows it off the road.
+- **One duff sample is a seam, not an edge.** These circuits are separate
+  meshes for asphalt and painted lines, and a ray on a join slips between them
+  onto the apron a metre below. Read as a step, that stopped the corridor walk
+  two metres from the centreline at a third of Yoyleland's stations.
+- **`profileSamples` is per-track.** Five heights across the road is 4.5 m
+  apart on a 1:15 circuit and fine; across Yoyleland's 22 m of 18° banking the
+  chord between them cuts far enough below a faceted deck that the bumper ray
+  clips the road itself.
+- **`widen` is one-way, and so is the default.** Normally the walk may only
+  *narrow* the road-mask widths; with `widen` it may only *widen* them. Both
+  directions matter: re-deriving a working circuit is how regressions ship
+  here, and a trial run bore it out - the material stop alone took Palm Mile's
+  narrowest point from 12.0 m to 8.05 m, because its pit lane is deliberately
+  absent from `roadMaterials` and the corridor legitimately runs up to it.
 - **Smoothing a corridor must never widen it.** A moving average over the
   measured widths bulges back over a wall at the few stations either side of
   it, which is enough to clip through. Take `Math.min(smoothed, measured)`.
@@ -545,10 +692,13 @@ node tools/diag_cars.mjs <track>   # car facing + wheels on a reference plane
 node tools/lap_tour.mjs <track>    # chase cam all the way round a lap
 node tools/check_grid.mjs          # what surface each starting slot sits on
 node tools/check_barriers.mjs      # walls inside the corridor, holes under the car
-node tools/check_wheels.mjs        # 4 wheels per car, and proof they turn
+node tools/check_wheels.mjs        # every wheel found, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
 node tools/check_museum.mjs        # every car on the plinth, and the race after
+node tools/check_pits.mjs          # pit roads on asphalt, and a stop end to end
+node tools/shots_pits.mjs <track>  # ... and a picture of Guido doing it
+node tools/check_fullscreen.mjs    # rotate to landscape, and the tap fallback
 node tools/check_netplay.mjs       # host and guest agree, at four latencies
 node tools/check_twoplayer.mjs     # two real tabs through the real menus
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
@@ -578,9 +728,13 @@ What "good" looks like right now:
   improved. Worst heading seen anywhere is 81° with every car still finishing;
   the run asserts nothing exceeds 172°, which is where `maxPsi` would be
   holding it.
-- `check_wheels.mjs` — four wheels on all seven cars, each turning 90° for a
-  quarter turn, all the same way. It checks numerically *and* renders, because
-  a tyre is nearly symmetric and a spinning one photographs as a still one.
+- `check_wheels.mjs` — the expected count on all nine models (four for the
+  racers, three for Guido, ten for Mack), two steered wheels each, every one
+  turning 90° for a quarter turn the same way. It checks numerically *and*
+  renders, because a tyre is nearly symmetric and a spinning one photographs
+  as a still one. The count is per-model in `EXPECTED`, and asserting the
+  exact number still matters — "found some wheels" would pass while quietly
+  missing an axle.
 - `check_racing.mjs` — the answer to "can I pass them?" as a number. It counts
   *duels* (drawing alongside) and what fraction get converted, over five laps,
   **ignoring the opening lap** — the player starts at the back and goes by most
@@ -598,14 +752,19 @@ What "good" looks like right now:
   the field weaves less than six times a lap **on the straights**. Counting
   swings everywhere instead flags a car running wide through a corner and
   coming back, which is what it is supposed to do.
-- `verify_track.mjs` — median height error 5 mm / 3 mm / 34 mm, and under
+- `verify_track.mjs` — median height error 5 mm / 3 mm / 9 mm, and under
   0.2% of points past 0.5 m on all three. The **median** is the signal that
   catches systemic drift.
 - `check_barriers.mjs` — zero barriers and zero holes on Motor Speedway and
-  Palm Mile. Yoyleland still reports both: its road genuinely is wide, so
-  `refine_track`'s `MAX_HALF` would trim it wrongly, and it came through the
-  other extraction route. Nobody has complained about it; fixing it needs a
-  per-track `MAX_HALF` first.
+  Palm Mile. Yoyleland reports 10 and 20, down from 30 and 32: it came through
+  the other extraction route and `refine_track` can only *widen* it (see
+  `widen` in `tracks.json`), never re-derive it. Nobody has complained about
+  it, and it is now strictly better than the road that shipped.
+- `check_pits.mjs` — for each circuit: every lane sample on a road material,
+  nothing across the lane at bumper height, the ribbon within 15 cm of the
+  surface, entry and exit overlapping the racing line — then a whole race, in
+  which the player drives in, is frozen for the service, stays under the limit
+  at the boxes, gains no progress at either handover, and every car stops.
 - `check_grid.mjs` — every slot on the racing surface: `Material.105` on Motor
   Speedway, `Material.227` on Palm Mile, `Asphalt` on Yoyleland. Anything else
   and somebody is starting in the pits - `Material.107` in particular *is* the
@@ -613,10 +772,13 @@ What "good" looks like right now:
   for a release.
 - `check_netplay.mjs` — both ends agree on the finishing order at every
   latency, no car is ever drawn off the road, and the guest's own car sits
-  0.08 m from the host's answer in a room rising to 8.5 m at 300 ms. That last
+  0.01 m from the host's answer in a room rising to 8.5 m at 300 ms. That last
   figure is `2 x latency x speed` and is not a bug; it is what predicting
   costs, and it is reported apart from the correction peaks so neither can
-  hide the other.
+  hide the other. **A photo finish is allowed to fall either way**: the guest
+  predicts its own car, so two cars finishing 0.05 s apart are inside that same
+  round trip by an order of magnitude and no correct netcode can resolve them.
+  What must never differ is a place that was actually decided.
 - `check_twoplayer.mjs` — two tabs build an identical grid, drive, agree on
   where everybody is to within a few metres, clear the start lights, and
   survive one of them closing. It uses the loopback transport, so a green run

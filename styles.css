@@ -306,6 +306,41 @@ button.big.ghost {
   color: #8fd0ff;
 }
 
+/* Tyre life, stacked directly under the speed readout.
+   Not along the bottom, which is where the steering arrows live - it sat
+   underneath the left arrow and could not be seen at all. */
+.hud-tyres {
+  left: calc(10px + var(--safe-l));
+  top: calc(8px + env(safe-area-inset-top, 0px) + clamp(46px, 9vh, 66px));
+  padding: 5px 10px;
+  gap: 4px;
+}
+.tyre-track {
+  width: clamp(52px, 11vh, 84px);
+  height: 9px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+/* Width and colour are set from the car's tyre life; the transition is what
+   keeps it from stepping visibly as the bar is only redrawn on a change. */
+#tyre-bar {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 5px;
+  background: #46d16b;
+  transition: width 0.35s linear, background-color 0.35s linear;
+}
+.tyre-call {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: #ff6b5e;
+  animation: pitblink 1s steps(2, end) infinite;
+}
+@keyframes pitblink { 50% { opacity: 0.15; } }
+
 #lights {
   position: absolute;
   top: 8vh;
@@ -404,6 +439,11 @@ button.big.ghost {
   line-height: 1.7;
   background: #0b1220;
 }
+/* One overlay, two messages: turn the phone, or tap to go fullscreen. */
+#rotate > div { display: none; }
+#rotate.nag .rotate-nag { display: block; }
+#rotate.full .rotate-full { display: block; }
+
 .phone-icon {
   width: 26vw;
   max-width: 130px;
@@ -417,6 +457,20 @@ button.big.ghost {
 @keyframes tip {
   0%, 30% { transform: rotate(0deg); }
   60%, 100% { transform: rotate(-90deg); }
+}
+.expand-icon {
+  width: 34vw;
+  max-width: 190px;
+  aspect-ratio: 1.9 / 1;
+  margin: 0 auto 5vh;
+  border: 5px solid #fff;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 4px #0b1220, inset 0 0 0 6px rgba(255, 255, 255, 0.25);
+  animation: grow 1.8s ease-in-out infinite;
+}
+@keyframes grow {
+  0%, 30% { transform: scale(0.8); }
+  60%, 100% { transform: scale(1); }
 }
 
 

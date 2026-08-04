@@ -46,7 +46,8 @@ track palm_mile_speedway          track-palm.glb   0.60 0.00006
 # Cars are nearly all texture weight - 1024px maps on a car that is a few
 # hundred pixels tall on a phone. 512 + WebP is visually identical here.
 echo "=== cars ==="
-for car in lightning_mcqueen chick_hicks the_king francesco_bernoulli jackson_storm mater doc_hudson; do
+for car in lightning_mcqueen chick_hicks the_king francesco_bernoulli jackson_storm mater doc_hudson \
+           guido mack; do
   $GT dedup "raw/$car.glb" "$TMP/d.glb" > /dev/null
   $GT resize "$TMP/d.glb" "$TMP/r.glb" --width 512 --height 512 > /dev/null
   $GT webp "$TMP/r.glb" "$TMP/p.glb" > /dev/null

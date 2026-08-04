@@ -29,7 +29,9 @@ import { driverAid } from '../src/physics.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
 const TRACKS = read('assets/tracks.json').tracks;
-const CARS = read('assets/cars.json').cars;
+// Racers only. Guido and Mack are in cars.json as the pit crew and the
+// parked transporter; putting them on the grid would race an 18 m artic.
+const CARS = read('assets/cars.json').cars.filter((c) => c.racer !== false);
 
 const DT = 1 / 120;
 const HOST_CAR = 'lightning_mcqueen';
@@ -160,6 +162,7 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
     finished: host.state === State.FINISHED,
     order: host.order.map((c) => c.spec.id),
     guestOrder: guest.order.map((c) => c.spec.id),
+    hostTimes: host.order.map((c) => +(c.finishTime || 0).toFixed(2)),
     worst,
     mean: samples ? total / samples : 0,
     outside,
@@ -180,13 +183,42 @@ console.log('"offset" is how far the guest\'s own car sits from the host\'s answ
 console.log('average - the standing cost of predicting - and "peak" the worst moment,');
 console.log('which is a correction being folded in. They fail for different reasons, so');
 console.log('they are checked separately.\n');
+/**
+ * Do two finishing orders agree, treating dead heats as unresolvable?
+ *
+ * Any pair the ends put in a different order has to have finished closer
+ * together than `tol` seconds. One clear place changing hands is a failure;
+ * a blanket finish shuffling is not.
+ */
+function orderAgrees(a, b, times, tol) {
+  if (a.length !== b.length) return false;
+  const at = new Map(a.map((id, i) => [id, times[i]]));
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) continue;
+    const ta = at.get(a[i]);
+    const tb = at.get(b[i]);
+    if (ta === undefined || tb === undefined) return false;
+    if (Math.abs(ta - tb) > tol) return false;
+  }
+  return true;
+}
+
 console.log('  link         rtt   loss  offset    peak   off-road   order   time');
 
 let failed = 0;
 for (const c of CASES) {
   for (const track of ['msots', 'palm']) {
     const r = run({ track, physics: 'arcade', difficulty: 'normal', ...c });
-    const agree = r.order.join() === r.guestOrder.join();
+    // Agreement, allowing a photo finish to fall either way.
+    //
+    // The guest *predicts* its own car, so where it thinks it crossed the line
+    // is up to a round trip of travel away from the host's answer - the same
+    // `2 x latency` that `offset` measures below. Two cars that finish 0.05 s
+    // apart are inside that by an order of magnitude, and no amount of correct
+    // netcode can resolve them: the question genuinely has no answer at that
+    // resolution. What must never happen is the ends disagreeing about a place
+    // that was actually *decided*, and that is what this checks.
+    const agree = orderAgrees(r.order, r.guestOrder, r.hostTimes, 2 * c.latency);
     // Prediction costs a round trip of position by construction: the guest
     // applies a button now, the host applies it one latency later, and the
     // snapshot correcting for it is another latency old. That much is the
@@ -214,7 +246,13 @@ for (const c of CASES) {
       failed++;
     }
     if (r.outside > 0) { console.log(`    ! the guest drew a car off the road ${r.outside} times`); failed++; }
-    if (!agree) { console.log('    ! the two ends disagree about the finishing order'); failed++; }
+    if (!agree) {
+      console.log('    ! the two ends disagree about a place that was decided');
+      console.log(`      host:  ${r.order.join(' ')}`);
+      console.log(`      guest: ${r.guestOrder.join(' ')}`);
+      console.log(`      host finish times: ${r.hostTimes.join(' ')}`);
+      failed++;
+    }
   }
 }
 

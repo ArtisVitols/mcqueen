@@ -11,6 +11,7 @@ import { PHYSICS, driverAid } from './physics.js';
 import { MSG, RemoteInput, packButtons, snapshot, SNAPSHOT_HZ, INPUT_HZ } from './net.js';
 import { GuestView } from './net/guest.js';
 import { Museum } from './museum.js';
+import { PitCrew } from './pitcrew.js';
 
 const dom = (id) => document.getElementById(id);
 
@@ -59,6 +60,14 @@ class Game {
       fetch(assetUrl('tracks.json')).then((r) => r.json()),
     ]);
     this.carSpecs = cars.cars;
+    // Guido and Mack are in the game but not on the grid: one is the pit crew,
+    // the other is parked in the pits. Everything that builds a field or lets
+    // you pick a car uses `racerSpecs`; only loading and the museum walk the
+    // full list.
+    this.racerSpecs = this.carSpecs.filter((c) => c.racer !== false);
+    if (!this.racerSpecs.some((c) => c.id === this.settings.car)) {
+      this.settings.car = this.racerSpecs[0].id;
+    }
     this.trackSpecs = tracks.tracks;
     if (!this.trackSpecs.some((t) => t.id === this.settings.track)) {
       this.settings.track = this.trackSpecs[0].id;
@@ -175,14 +184,59 @@ class Game {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * Portrait asks for the phone to be turned; landscape goes fullscreen.
+   *
+   * Rotating the phone is **not** a user activation, so Chrome refuses
+   * `requestFullscreen` from an orientationchange handler unless the page
+   * still happens to hold activation from a recent tap. The free shot is
+   * worth taking - it often lands - but the tap panel is what actually
+   * delivers it, which is why the overlay has two states rather than one.
+   */
   watchOrientation() {
-    const check = () => {
+    const el = dom('rotate');
+    // Phones only. On a desktop - and in headless Chrome, where every browser
+    // test runs at a landscape viewport - a fullscreen nag over the menu is
+    // both wrong and would swallow the clicks those tests make.
+    const phone = matchMedia('(hover: none) and (pointer: coarse)').matches
+                  && !!document.documentElement.requestFullscreen;
+    let offer = phone;
+    let wasPortrait = innerHeight > innerWidth;
+
+    const paint = () => {
       const portrait = innerHeight > innerWidth;
-      dom('rotate').classList.toggle('hidden', !portrait);
+      const wants = !portrait && offer && !document.fullscreenElement;
+      el.classList.toggle('nag', portrait);
+      el.classList.toggle('full', wants);
+      el.classList.toggle('hidden', !portrait && !wants);
     };
-    addEventListener('resize', check);
-    addEventListener('orientationchange', check);
-    check();
+
+    const turned = () => {
+      // A fresh rotation re-arms the offer and takes the free shot.
+      offer = phone;
+      if (offer && innerHeight <= innerWidth && !document.fullscreenElement) {
+        this.goFullscreen();
+      }
+      paint();
+    };
+
+    addEventListener('resize', () => {
+      // Entering or leaving fullscreen also fires resize. Only a real flip
+      // between portrait and landscape counts as turning the phone, or
+      // dismissing the panel would immediately re-arm it.
+      const portrait = innerHeight > innerWidth;
+      if (portrait !== wasPortrait) { wasPortrait = portrait; turned(); }
+      else paint();
+    });
+    addEventListener('orientationchange', turned);
+    document.addEventListener('fullscreenchange', () => {
+      // Leaving fullscreen is a decision, not an accident: do not ask again
+      // until the phone is turned.
+      if (!document.fullscreenElement) offer = false;
+      paint();
+    });
+    el.addEventListener('click', () => this.goFullscreen());
+    turned();
   }
 
   // ------------------------------------------------------------------- menu
@@ -224,7 +278,7 @@ class Game {
   buildCarPicker() {
     const wrap = dom('car-picker');
     wrap.innerHTML = '';
-    for (const spec of this.carSpecs) {
+    for (const spec of this.racerSpecs) {
       const b = document.createElement('button');
       b.className = 'card';
       b.dataset.car = spec.id;
@@ -476,8 +530,8 @@ class Game {
     // Two people cannot drive the same car. The guest asked for one; if it is
     // taken they get the first that is not.
     let guestCar = hello.car;
-    if (guestCar === hostCar || !this.carSpecs.some((c) => c.id === guestCar)) {
-      guestCar = this.carSpecs.find((c) => c.id !== hostCar).id;
+    if (guestCar === hostCar || !this.racerSpecs.some((c) => c.id === guestCar)) {
+      guestCar = this.racerSpecs.find((c) => c.id !== hostCar).id;
     }
     const start = {
       t: MSG.START,
@@ -805,9 +859,10 @@ class Game {
     this.goFullscreen();
     this.input.reset();
 
-    for (const [, m] of this.models) m.object.visible = true;
+    // Racers only. The props are placed - and shown - by the pit lane.
+    for (const spec of this.racerSpecs) this.models.get(spec.id).object.visible = true;
 
-    const entries = this.carSpecs.map((spec) => ({
+    const entries = this.racerSpecs.map((spec) => ({
       spec,
       object: this.models.get(spec.id).object,
     }));
@@ -848,6 +903,7 @@ class Game {
       this.hud.setLaps(this.settings.laps);
     }
     this.race = race;
+    this.buildPits(race);
     this.hud.setField(race.field.length);
     this.hud.setLights(0, false);
     this.hud.update(race.player, this.settings.laps);
@@ -876,8 +932,88 @@ class Game {
    * removes the longitudinal lag entirely, and it banks with the track for
    * free. Only the lateral offset is smoothed, so lane changes still glide.
    */
+  /**
+   * The pit box, Guido and Mack - set up once when a race starts.
+   *
+   * All generated geometry, the way `models.js` builds a contact shadow and
+   * `museum.js` builds its plinth. Nothing is re-exported from a GLB;
+   * `optimize.sh` is the most trap-laden part of this repo and is left alone.
+   */
+  buildPits(race) {
+    if (this.pitGroup) { this.scene.remove(this.pitGroup); this.pitGroup = null; }
+    this.crew = null;
+    this.hud.setTyres(!!race.pits);
+    if (!race.pits) return;
+
+    const road = race.pits.road;
+    const group = new THREE.Group();
+    group.name = 'pit-furniture';
+    const st = {};
+    const p = new THREE.Vector3();
+
+    // One yellow box per car, laid flat on the pit road. Slightly proud of the
+    // surface, like the contact shadows, or it z-fights with the asphalt.
+    const paint = new THREE.MeshBasicMaterial({
+      color: 0xffd400, transparent: true, opacity: 0.55, depthWrite: false,
+    });
+    for (const box of road.boxes) {
+      road.sample(box.d, st);
+      const mark = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 6.4), paint);
+      road.position(st, box.n, p);
+      mark.position.copy(p);
+      mark.position.y += 0.02;
+      mark.rotation.set(-Math.PI / 2, 0, -Math.atan2(st.tx, st.tz));
+      group.add(mark);
+    }
+    this.scene.add(group);
+    this.pitGroup = group;
+
+    // Guido waits by the player's own box; Mack is parked behind him.
+    const mine = road.boxFor(race.player.gridIndex);
+    road.sample(mine.d, st);
+    road.position(st, mine.n, p);
+    const side = this._w.set(st.ox, 0, st.oz).multiplyScalar(Math.sign(mine.n) || -1);
+    const guido = this.models.get('guido');
+    const mack = this.models.get('mack');
+    this.crew = new PitCrew(guido?.object || null, mack?.object || null);
+    this.crew.place(p, side, Math.atan2(st.tx, st.tz));
+  }
+
+  /** Per frame: the crew, and the tyre readout. */
+  updatePits(race, player, dt) {
+    if (race.pits) {
+      // Left, because the pits are inboard and these ovals run anticlockwise.
+      const call = player.tyre < 0.3 ? 'PIT!' : race.pitOpen(player) ? 'PIT ◀' : null;
+      this.hud.setTyre(player.tyre, call);
+    }
+    if (!this.crew) return;
+    // Guido only ever serves the local player's car: it is a thing to watch,
+    // and seven forklifts at once is a car park rather than a pit stop.
+    const servicing = player.pit === 'service';
+    if (servicing && !this.crew.active) {
+      const rig = player.model.userData.wheels;
+      const corners = rig
+        ? rig.wheels.map((w) => player.model.localToWorld(w.centre.clone()))
+        : null;
+      this.crew.begin(corners, player.position);
+    } else if (!servicing && this.crew.active) {
+      this.crew.end();
+    }
+    this.crew.update(dt);
+    // He is a car: his own wheels turn while he trundles.
+    this.models.get('guido')?.object.userData.wheels?.update(
+      { speed: this.crew.active ? 3.2 : 0, steerAngle: 0, steer: 0,
+        accelLat: 0, accelLong: 0 }, dt);
+  }
+
   placeCamera(car, blend) {
-    const track = this.track;
+    // Whichever ribbon the car is on. Anchoring on the circuit while the car
+    // is in the pits leaves the camera eighty metres away pointing down an
+    // empty straight - the car is simply not in shot.
+    //
+    // The handover is safe because the two ribbons overlap in space wherever
+    // it can happen, so the camera slides along the road rather than cutting.
+    const track = car.road;
     const back = 7.6 + Math.min(3.4, car.speed * 0.05);
     const height = 2.5 + Math.min(1.0, car.speed * 0.011);
 
@@ -965,6 +1101,7 @@ class Game {
     const player = race.player;
     this.placeCamera(player, 1 - Math.pow(0.0016, dt));
     this.hud.update(player, this.settings.laps);
+    this.updatePits(race, player, dt);
 
     // Keep the shadow frustum on the player rather than the whole speedway.
     this.sunTarget.position.copy(player.position);

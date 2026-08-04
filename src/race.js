@@ -3,6 +3,7 @@ import { Car } from './car.js';
 import { Driver, makeRng } from './ai.js';
 import { DIFFICULTY } from './settings.js';
 import { PHYSICS, driverAid, laneSteer } from './physics.js';
+import { PitLane, Pit, SERVICE_TIME } from './pitstop.js';
 
 /**
  * A single race: the grid, the countdown, the running order and the finish.
@@ -18,6 +19,19 @@ const GRID_LANE = 3.2;
 const COUNTDOWN_STEP = 0.9;  // seconds between red lights
 const DRAFT_RANGE = 34;      // metres, matches the AI's own draft window
 const BASE_SPEED = 78;       // m/s that every pace figure is a fraction of
+// Tyre life used per lap of clean running, before the load multiplier in
+// Car.step - which on these circuits averages about 1.5. So a set lasts
+// roughly eight laps and the AI comes in after six: a 5-lap race needs no
+// stop, a 10-lap race needs one, and a 20-lap race is a three-stopper. That
+// spread is why the 2/5/10/15/20 lap options exist.
+const WEAR_PER_LAP = 1 / 12;
+// The AI comes in below this, if the lane is there and the race is long
+// enough to be worth it.
+const AI_PIT_AT = 0.28;
+// A car aiming for the pits has one taper to cross the road in, which is
+// less time than an overtake - so it uses the committed gain, exactly as a
+// move does. The ordinary one abandons the entry half-finished.
+const PIT_AIM_CLOSE = 2.2;
 
 export const State = {
   COUNTDOWN: 'countdown',
@@ -35,6 +49,17 @@ export class Race {
     this.physics = PHYSICS[settings.physics] || PHYSICS.arcade;
     this.totalLaps = settings.laps;
     this.rng = makeRng(0x5eed);
+
+    // The pit road, where the circuit has one. Without it there is no wear
+    // either: a tyre bar draining with nowhere to drive into would be a
+    // countdown to being slow, which is the opposite of a decision.
+    this.pits = track.data.pit ? new PitLane(track, track.data.pit) : null;
+    // Per metre. Sized so a five-lap race needs no stop on any circuit and a
+    // long one does - which is what the 2/5/10/15/20 lap options are for.
+    // Scaled by lap length so a stop falls at the same point of a race
+    // whether the lap is 1.5 km or 2.8 km.
+    this.wearRate = this.pits ? WEAR_PER_LAP / track.lapLength : 0;
+    this.serviceTime = SERVICE_TIME[settings.difficulty] ?? SERVICE_TIME.normal;
 
     this.field = [];
     this.drivers = [];
@@ -92,6 +117,11 @@ export class Race {
       // and a five-year-old need very different help off the same grid.
       car.assist = car.isPlayer ? (this.tuning.assist ?? 1) : 1;
       car.lift = car.isPlayer ? (this.tuning.lift ?? 0) : 0;
+      car.wearRate = this.wearRate;
+      car.pit = Pit.OUT;
+      car.pitTimer = 0;
+      car.pitStops = 0;
+      car.pitDone = -1;
 
       const row = Math.floor(i / 2);
       // Row 0 sits just behind the line; the pack stretches back from there.
@@ -216,7 +246,23 @@ export class Race {
       const source = car === this.player ? input : this.inputs.get(car);
       if (!source) continue;              // a guest who has not sent anything yet
       source.applyTo(car, dt, this.physics);
+      // A car being serviced is not being driven. Reading the buttons first
+      // and letting the lane overwrite them keeps `steerCmd` honest for the
+      // wheels and the HUD, but nothing the player presses moves the car.
+      if (this.stepPit(car, dt)) continue;
       driverAid(car, car.lift ?? 0, dt, this.field);
+      // A player turns in themselves: steer down to the inside while the entry
+      // is open and you are in the pits. That is the whole gesture, and it is
+      // how it works in the sport - `tryEnter` gates on where the car actually
+      // is, so calling it every step costs nothing and needs no button.
+      //
+      // On Easy the aid also steers them in, because holding the throttle down
+      // has to be enough to win and it is not if the tyres go off and nobody
+      // ever comes in. Same rule that already makes the aid overtake there.
+      if (this.pits && this.shouldPit(car)) {
+        if ((car.lift ?? 0) >= 0.7) this.aimForPits(car, dt);
+        this.pits.tryEnter(car);
+      }
     }
 
     for (const driver of this.drivers) {
@@ -225,8 +271,18 @@ export class Race {
         this.coolDown(car, dt);
         continue;
       }
+      if (this.stepPit(car, dt)) continue;
       driver.update(dt, this.field, this.tuning, this.physics);
       this.rubberBand(car);
+      // Rivals stop too, or a stop is a penalty rather than a strategy - and
+      // "Easy is winnable by holding the throttle down" would stop being true
+      // the moment tyres mattered.
+      if (!car.isPlayer && this.shouldPit(car)) {
+        // A rival has to be *steered* in. Without this it wants to pit, is
+        // told it may, and sails past the entry every lap on the racing line.
+        this.aimForPits(car, dt);
+        this.pits.tryEnter(car);
+      }
     }
 
     // The AI gets its tow through its own target speed; a human has no such
@@ -256,6 +312,66 @@ export class Race {
   }
 
   /**
+   * One step of a car's pit stop. True if the lane took over the controls.
+   *
+   * Also holds the rev limiter down to the pit speed limit while it is in
+   * there. Doing it here rather than inside the stop means it applies from the
+   * moment the car commits, including the run down to the box.
+   */
+  stepPit(car, dt) {
+    if (!this.pits) return false;
+    if (car.pit === Pit.OUT) {
+      car.topSpeed = car.pitSpeedWas ?? car.topSpeed;
+      car.pitSpeedWas = null;
+      return false;
+    }
+    if (car.pitSpeedWas === null || car.pitSpeedWas === undefined) {
+      car.pitSpeedWas = car.topSpeed;
+    }
+    car.topSpeed = Math.min(car.pitSpeedWas, this.pits.speedLimit);
+    const was = car.pit;
+    const took = this.pits.step(car, dt, this.serviceTime, car.gridIndex);
+    if (was === Pit.SERVICE && car.pit === Pit.LEAVING) car.pitStops++;
+    return took;
+  }
+
+  /**
+   * Should this AI come in?
+   *
+   * Only when the tyres are actually gone, and only if there is enough race
+   * left to be worth the time - stopping on the last lap is how a rival
+   * throws away a place for nothing.
+   */
+  shouldPit(car) {
+    if (!this.pits || car.tyre > AI_PIT_AT) return false;
+    const left = this.totalLaps * this.track.lapLength - car.progress;
+    return left > this.track.lapLength * 1.2;
+  }
+
+  /**
+   * Steer a car that wants to pit down to the inside edge, so it can turn in.
+   *
+   * Overrides whatever the driver or the aid asked for, and only inside the
+   * entry window - the same `laneSteer` everything else uses, so a car heading
+   * for the pits moves like a car and not like a magnet.
+   */
+  aimForPits(car, dt) {
+    if (!this.pits || !this.pits.canEnter(car)) return;
+    const st = this.track.sample(car.s, car.st);
+    car.steer = laneSteer(car, this.track.limit(st, -1) + 0.6, dt, PIT_AIM_CLOSE);
+  }
+
+  /**
+   * Is this car in the stretch of lap where it could turn in? Drives the HUD
+   * prompt, so a player knows when steering left will actually do something
+   * rather than just running them down the apron.
+   */
+  pitOpen(car) {
+    return !!this.pits && car.pit === Pit.OUT && !car.finished
+      && this.pits.canEnter(car);
+  }
+
+  /**
    * A car that has taken the flag keeps rolling, and moves out of the way.
    *
    * Braking to a stop is fine when the whole field finishes within a few
@@ -265,8 +381,12 @@ export class Race {
    * race simply never ended.
    */
   coolDown(car, dt) {
-    const st = this.track.sample(car.s, car.st);
-    car.steer = laneSteer(car, this.track.limit(st, 1) - 1.0, dt);
+    // Whichever ribbon it is on: a car can take the flag on its way down the
+    // pit lane, and steering it towards the *circuit's* outside wall from in
+    // there would drive it through the pit wall.
+    if (car.onPit && this.pits) { this.pits.step(car, dt, this.serviceTime, car.gridIndex); return; }
+    const st = car.road.sample(car.s, car.st);
+    car.steer = laneSteer(car, car.road.limit(st, 1) - 1.0, dt);
     const target = car.topSpeed * 0.45;
     car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.5, 0, 1);
     car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.12, 0, 1);
@@ -336,7 +456,11 @@ export class Race {
     for (let i = 0; i < f.length; i++) {
       for (let j = i + 1; j < f.length; j++) {
         const a = f[i], b = f[j];
-        const ds = this.track.delta(a.s, b.s);
+        // Two ribbons: a car in the pits and a car on the racing line can sit
+        // at the same lap position and be seventy metres apart. Only cars on
+        // the same road can touch.
+        if (a.road !== b.road) continue;
+        const ds = a.road.delta(a.s, b.s);
         if (Math.abs(ds) > 5.2) continue;
         const dn = b.n - a.n;
         const overlap = 2.3 - Math.abs(dn);
@@ -369,14 +493,14 @@ export class Race {
 
   /** How much further this car can move towards `sign` before leaving the road. */
   room(car, sign) {
-    const st = this.track.sample(car.s, car.st);
-    const lim = this.track.limit(st, sign);
+    const st = car.road.sample(car.s, car.st);
+    const lim = car.road.limit(st, sign);
     return Math.max(0, sign > 0 ? lim - car.n : car.n - lim);
   }
 
   clampLateral(car) {
-    const st = this.track.sample(car.s, car.st);
-    car.n = THREE.MathUtils.clamp(car.n, this.track.limit(st, -1), this.track.limit(st, 1));
+    const st = car.road.sample(car.s, car.st);
+    car.n = THREE.MathUtils.clamp(car.n, car.road.limit(st, -1), car.road.limit(st, 1));
     car.sync(st);
   }
 

@@ -70,12 +70,23 @@ export class Track {
    * Interpolated station data at distance s.
    * Fills and returns `out` to avoid allocating in the hot loop.
    */
-  sample(s, out = {}) {
-    const d = this.data;
+  /**
+   * The two stations either side of `s`, and the blend between them.
+   *
+   * Its own method so that a ribbon with *ends* rather than a loop - the pit
+   * road, see src/pits.js - can share every other piece of geometry here.
+   * Wrapping from the last station back to the first is exactly right for a
+   * lap and exactly wrong for a pit lane.
+   */
+  span(s) {
     const f = this.wrap(s) / this.step;
     const i = Math.floor(f) % this.count;
-    const j = (i + 1) % this.count;
-    const t = f - Math.floor(f);
+    return [i, (i + 1) % this.count, f - Math.floor(f)];
+  }
+
+  sample(s, out = {}) {
+    const d = this.data;
+    const [i, j, t] = this.span(s);
     const u = 1 - t;
 
     out.x = d.x[i] * u + d.x[j] * t;
@@ -107,9 +118,19 @@ export class Track {
     return out;
   }
 
-  /** Metres of centreline covered per metre driven at lateral offset n. */
+  /**
+   * Metres of centreline covered per metre driven at lateral offset n.
+   *
+   * Clamped, because the expression is singular: at `n * kappa = -1` the car
+   * is exactly on the centre of curvature and the scale goes to infinity. An
+   * oval never gets near it - the offsets are metres and the radii hundreds -
+   * but the pit road's entry taper sweeps across the infield in a short
+   * distance, and there a car three metres off the ribbon's centreline
+   * advanced five metres of lap in a single 1/120 s step. The floor is far
+   * below anything a real corner produces, so no circuit behaviour changes.
+   */
   arcScale(st, n) {
-    return 1 / (1 + n * st.kappa);
+    return 1 / Math.max(0.35, 1 + n * st.kappa);
   }
 
   /** How far sideways a car may go before it is off the racing surface. */

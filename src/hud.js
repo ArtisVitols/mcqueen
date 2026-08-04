@@ -10,10 +10,21 @@ export class Hud {
     this.lights = root.querySelector('#lights');
     this.bulbs = [...root.querySelectorAll('#lights .bulb')];
     this.flash = root.querySelector('#flash');
+    this.tyres = root.querySelector('#tyres');
+    this.tyreBar = root.querySelector('#tyre-bar');
+    this.tyreCall = root.querySelector('#tyre-call');
     this._lap = -1;
     this._place = -1;
     this._speed = -1;
     this._gear = -1;
+    this._tyre = -1;
+    this._call = null;
+  }
+
+  /** Show the tyre bar only where there is a pit road to drive into. */
+  setTyres(enabled) {
+    this.tyres.classList.toggle('hidden', !enabled);
+    this._tyre = -1;
   }
 
   setLaps(total) {
@@ -22,6 +33,30 @@ export class Hud {
 
   setField(n) {
     this.placeTotal.textContent = n;
+  }
+
+  /**
+   * Tyre life, and whether to shout about it.
+   *
+   * @param {number} tyre  1 fresh to 0 worn out
+   * @param {string|null} call  'PIT!' when they need changing, 'PIT →' while
+   *   the entry is open, null otherwise
+   */
+  setTyre(tyre, call) {
+    // Rounded before comparing: the bar changes by a millionth every step and
+    // rewriting a style every frame is how a HUD costs frames.
+    const pct = Math.round(Math.max(0, Math.min(1, tyre)) * 100);
+    if (pct !== this._tyre) {
+      this._tyre = pct;
+      this.tyreBar.style.width = `${pct}%`;
+      // Green through amber to red. Hue alone, so it never goes muddy.
+      this.tyreBar.style.backgroundColor = `hsl(${Math.round(pct * 1.25)} 72% 52%)`;
+    }
+    if (call !== this._call) {
+      this._call = call;
+      this.tyreCall.textContent = call || '';
+      this.tyreCall.classList.toggle('hidden', !call);
+    }
   }
 
   update(car, totalLaps) {

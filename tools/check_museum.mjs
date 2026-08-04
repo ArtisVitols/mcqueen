@@ -68,19 +68,27 @@ opened.shown && opened.trackHidden
   : fail(JSON.stringify(opened));
 
 // Every car, and a render of each. A tiny image means an unlit or missing car.
+// All nine, not the seven racers: Guido and Mack are cars, and the showroom is
+// for looking at cars.
+const COUNT = await page.evaluate(() => window.game.carSpecs.length);
 const names = [];
-for (let i = 0; i < 7; i++) {
+for (let i = 0; i < COUNT; i++) {
   const info = await page.evaluate(() => {
     const g = window.game;
     const spec = g.carSpecs[g.museumAt];
     const o = g.models.get(spec.id).object;
-    return { name: spec.name, visible: o.visible, dist: +g.museum.dist.toFixed(1) };
+    return { name: spec.name, visible: o.visible, dist: +g.museum.dist.toFixed(1),
+             maxDist: +g.museum.maxDist.toFixed(1) };
   });
   names.push(info.name);
   if (!info.visible) fail(`${info.name} is not visible on the plinth`);
-  if (info.dist < 3 || info.dist > 12) fail(`${info.name} framed at ${info.dist} m`);
+  // The upper bound is per-car now: Mack is 18 m long and is looked at from
+  // four times as far back as a car.
+  if (info.dist < 3 || info.dist > info.maxDist) {
+    fail(`${info.name} framed at ${info.dist} m (max ${info.maxDist})`);
+  }
   await page.screenshot({ path: join(OUT, `museum_${String(i).padStart(2, '0')}.png`) });
-  if (i < 6) { await page.click('#mus-next'); await sleep(1600); }
+  if (i < COUNT - 1) { await page.click('#mus-next'); await sleep(1600); }
 }
 ok(`all ${names.length} cars shown and framed: ${names.join(', ')}`);
 
@@ -91,7 +99,7 @@ wrapped === names[0] ? ok('next wraps back to the first car')
                      : fail(`next wrapped to ${wrapped}, expected ${names[0]}`);
 await page.click('#mus-prev'); await sleep(1200);
 const back = await page.evaluate(() => document.getElementById('mus-title').textContent);
-back === names[6] ? ok('prev wraps to the last car') : fail(`prev gave ${back}`);
+back === names[COUNT - 1] ? ok('prev wraps to the last car') : fail(`prev gave ${back}`);
 
 // Drag must reach the canvas. The caption sits mid-screen and has swallowed
 // this before, so aim the drag exactly where the caption is.
@@ -116,7 +124,10 @@ await page.evaluate(() => { for (let i = 0; i < 40; i++) window.game.museum.pinc
 const dMin = await page.evaluate(() => window.game.museum.dist);
 await page.evaluate(() => { for (let i = 0; i < 80; i++) window.game.museum.pinch(0.6); });
 const dMax = await page.evaluate(() => window.game.museum.dist);
-d1 < d0 && dMin >= 3 && dMax <= 12
+// The far clamp is per-exhibit - 12 m for a car, four times that for Mack -
+// so ask the museum what its own limit is rather than hard-coding one.
+const limit = await page.evaluate(() => window.game.museum.maxDist);
+d1 < d0 && dMin >= 3 && dMax <= limit + 1e-6
   ? ok(`pinch zooms (${d0.toFixed(1)} -> ${d1.toFixed(1)} m) and clamps to ${dMin}..${dMax} m`)
   : fail(`zoom limits wrong: ${[d0, d1, dMin, dMax].map((v) => v.toFixed(1)).join(' ')}`);
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "yaw is the rotation in radians needed to make the model face +Z. All seven models already face +Z. Verify with tools/diag_cars.mjs, which renders them textured from the front: these characters have eyes on the windscreen, so the front is unmistakable. An untextured silhouette is not enough - reading one wrong had Chick Hicks racing backwards. length is the real-world length in metres the model is scaled to at load; the raw models range from 5 units to 2005 units so scale is always derived from the bounding box.",
+  "_comment": "yaw is the rotation in radians needed to make the model face +Z. All seven models already face +Z. Verify with tools/diag_cars.mjs, which renders them textured from the front: these characters have eyes on the windscreen, so the front is unmistakable. An untextured silhouette is not enough - reading one wrong had Chick Hicks racing backwards. length is the real-world length in metres the model is scaled to at load; the raw models range from 5 units to 2005 units so scale is always derived from the bounding box. \"racer\": false marks a model that is in the game but not on the grid: Guido is the pit crew and Mack is parked in the pits. They still load, and the museum still shows them - they are cars, and the showroom is for looking at cars - but Race never builds a Car for them.",
   "cars": [
     {
       "id": "lightning_mcqueen",
@@ -77,6 +77,24 @@
       "pace": 0.95,
       "aggression": 0.3,
       "lane": 4.0
+    },
+    {
+      "id": "guido",
+      "name": "Guido",
+      "number": "PIT",
+      "colour": "#4aa8dd",
+      "yaw": 0,
+      "length": 1.4,
+      "racer": false
+    },
+    {
+      "id": "mack",
+      "name": "Mack",
+      "number": "RIG",
+      "colour": "#c62828",
+      "yaw": 0,
+      "length": 18.0,
+      "racer": false
     }
   ]
 }

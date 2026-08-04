@@ -14,9 +14,10 @@ import * as THREE from 'three';
  *   bones   rotate the bones that are already there
  *
  * A wheel is a disc: round in the plane across the car, thin along the axle,
- * and sitting on the road with its centre one radius up. That test finds
- * exactly four clusters on every car here and nothing else, so no per-car
- * table is needed - see tools/check_wheels.mjs, which prints what it found.
+ * and sitting on the road with its centre one radius up. That test finds the
+ * wheels and nothing else on every model here, so no per-car table is needed -
+ * see tools/check_wheels.mjs, which prints what it found. The *count* is not
+ * fixed: the racers have four, Guido has three and Mack has ten.
  *
  * The spin direction is derived, never assumed. McQueen's left-hand wheel
  * bones carry a rotation that flips their local X, so a shared angle would
@@ -29,6 +30,12 @@ const MIN_RADIUS = 0.14;        // metres, after the model is scaled to size
 const MAX_RADIUS = 0.75;
 const GROUND_TOL = 0.45;        // centre height must be about one radius
 const MIN_TRIS = 8;
+// Not everything here has four. Guido is a three-wheeled forklift and Mack is
+// a ten-wheeled artic; insisting on four is what left both of them sliding
+// down the road on frozen tyres. The range is still a sanity check - a car
+// that "finds" twenty wheels has found something else.
+const MIN_WHEELS = 3;
+const MAX_WHEELS = 12;
 
 const ROLL_PER_G = 0.030;       // radians of body roll per g of cornering
 const DIVE_PER_G = 0.022;       // ... and of pitch per g of braking
@@ -124,9 +131,19 @@ export class Wheels {
 function fromBones(pivot) {
   const found = [];
   pivot.traverse((o) => {
-    if (/(^|_)wheel_(front|rear)_[LR]/i.test(o.name)) found.push(o);
+    // McQueen's 3ds Max biped names them Bip01_wheel_front_L_050; Guido's CAT
+    // rig calls his three CATRig_wheel_b_55 / _l_57 / _r_59. Both are already
+    // in the right places, which is the whole reason for this route.
+    //
+    // The terminator is `(_|$)`, never `\b`: these names carry a numeric
+    // suffix, and `\b` between the `R` and the `_` matches nothing at all
+    // because both are word characters - which silently took every wheel off
+    // the player's car. It is also what excludes the `wheelbase_*` bones,
+    // which sit at the same places and would double the count.
+    if (/(^|_)wheel_(front|rear)_[LR](_|$)/i.test(o.name)
+        || /(^|_)wheel_[blrf](_|$)/i.test(o.name)) found.push(o);
   });
-  if (found.length !== 4) return null;
+  if (found.length < MIN_WHEELS || found.length > MAX_WHEELS) return null;
 
   const inv = new THREE.Matrix4();
   const local = new THREE.Vector3();
@@ -134,7 +151,7 @@ function fromBones(pivot) {
     n.getWorldPosition(local);
     return pivot.worldToLocal(local.clone()).z;
   });
-  const mid = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const steered = frontAxle(zs);
 
   return found.map((node, i) => {
     node.getWorldPosition(local);
@@ -151,9 +168,25 @@ function fromBones(pivot) {
       up: carAxis(pivot, inv, 0, 1, 0),
       centre,
       radius: Math.max(0.15, centre.y),
-      front: zs[i] > mid,
+      front: steered(zs[i]),
     };
   });
+}
+
+/**
+ * Which wheels steer: the frontmost axle only.
+ *
+ * A midpoint test is right for a car and wrong for anything else - it would
+ * have Mack steering with his drive axles and half his trailer. Group the
+ * wheels into axles by z and let only the foremost group turn.
+ */
+function frontAxle(zs) {
+  const front = Math.max(...zs);
+  const span = front - Math.min(...zs);
+  // A car's two axles are far apart, so half the span keeps its behaviour
+  // exactly; a lorry's are close, so the tolerance has to be absolute.
+  const tol = Math.min(span * 0.5, Math.max(0.35, span * 0.12));
+  return (z) => z > front - tol;
 }
 
 function carAxis(pivot, parentInv, x, y, z) {
@@ -176,11 +209,10 @@ function fromSplit(pivot) {
     const found = splitMesh(pivot, mesh);
     if (found) out.push(...found);
   }
-  if (out.length !== 4) return null;
+  if (out.length < MIN_WHEELS || out.length > MAX_WHEELS) return null;
 
-  const zs = out.map((w) => w.centre.z);
-  const mid = (Math.min(...zs) + Math.max(...zs)) / 2;
-  for (const w of out) w.front = w.centre.z > mid;
+  const steered = frontAxle(out.map((w) => w.centre.z));
+  for (const w of out) w.front = steered(w.centre.z);
   return out;
 }
 
@@ -258,7 +290,7 @@ function splitMesh(pivot, mesh) {
     if (near) { near.items.push(item); near.box.union(item.box); }
     else clusters.push({ items: [item], box: item.box.clone(), centre: c, radius: size(item.box).y / 2 });
   }
-  if (clusters.length !== 4) return null;
+  if (clusters.length < MIN_WHEELS || clusters.length > MAX_WHEELS) return null;
 
   const wheels = [];
   for (const cl of clusters) {

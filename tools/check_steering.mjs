@@ -24,7 +24,9 @@ import { DIFFICULTY } from '../src/settings.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
 const TRACKS = read('assets/tracks.json').tracks;
-const CARS = read('assets/cars.json').cars;
+// Racers only. Guido and Mack are in cars.json as the pit crew and the
+// parked transporter; putting them on the grid would race an 18 m artic.
+const CARS = read('assets/cars.json').cars.filter((c) => c.racer !== false);
 const DT = 1 / 120;
 
 /**

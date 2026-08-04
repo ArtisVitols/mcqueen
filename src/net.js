@@ -115,12 +115,17 @@ export function snapshot(race) {
       round(car.speed, 2), round(car.progress, 1),
       car.lap, car.place, car.finished ? 1 : 0,
       round(car.slip, 2), car.gear | 0,
+      // Tyre life and whether the car is in the pits. The second is not
+      // cosmetic: a guest that predicts a stopped car through its own physics
+      // drives it out from under the crew, exactly as predicting through the
+      // countdown drove it most of a lap before the lights went out.
+      round(car.tyre, 3), car.onPit ? 1 : 0,
     );
   }
   return { t: MSG.SNAP, c: race.clock, st: race.state, l: race.lights, cars };
 }
 
-export const SNAP_STRIDE = 10;
+export const SNAP_STRIDE = 12;
 
 /**
  * Read a snapshot into a set of interpolation targets.
@@ -144,6 +149,8 @@ export function readSnapshot(msg, into = []) {
     c.finished = !!msg.cars[b + 7];
     c.slip = msg.cars[b + 8];
     c.gear = msg.cars[b + 9];
+    c.tyre = msg.cars[b + 10];
+    c.onPit = !!msg.cars[b + 11];
   }
   into.length = Math.ceil(msg.cars.length / SNAP_STRIDE);
   return into;

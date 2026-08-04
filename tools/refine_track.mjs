@@ -54,6 +54,7 @@ for (const spec of todo) {
     const THREE = await import('three');
     const { loadTrack, assetUrl } = await import('../src/models.js');
     const { Track } = await import('../src/track.js');
+    const { chunkForRays } = await import('./chunk.js');
 
     const track = await Track.load(assetUrl(trackSpec.data));
     const data0 = track.data;      // banking seed from the overhead extraction
@@ -71,14 +72,19 @@ for (const spec of todo) {
     const yLo = Math.min(...ys) - 8;
     const yHi = Math.max(...ys) + 8;
     // Keep the originals - re-parenting clones would drop the scene's scale.
-    const ground = [];
+    const picked = [];
     const box = new THREE.Box3();
     scene.traverse((o) => {
       if (!o.isMesh || invisible(o)) return;
       box.setFromObject(o);
       if (box.min.y > yHi || box.max.y < yLo) return;
-      ground.push(o);
+      picked.push(o);
     });
+    // Yoyleland's fence, grandstands and concrete each ring the whole circuit,
+    // so their bounding boxes reject nothing and every one of the ~400,000
+    // rays below scans all 400k triangles. Chunking them into a grid of tight
+    // boxes is the difference between a minute and most of a day.
+    const ground = chunkForRays(picked);
 
     const ray = new THREE.Raycaster();
     ray.far = 400;
@@ -90,8 +96,12 @@ for (const spec of todo) {
     const dir = new THREE.Vector3();
     const nrm = new THREE.Vector3();
 
-    /** Surface height at (s, n), picking the hit nearest `expect`. */
-    const surfaceAt = (st, n, expect) => {
+    /**
+     * The surface at (s, n): the hit nearest `expect`, with the material that
+     * was hit. The material is what lets the edge walk tell asphalt from the
+     * grass beside it - see `edge()`.
+     */
+    const hitAt = (st, n, expect) => {
       track.position(st, n, p);
       origin.set(p.x, expect + 60, p.z);
       ray.set(origin, down);
@@ -100,9 +110,18 @@ for (const spec of todo) {
       let best = null;
       for (const h of hits) {
         const d = Math.abs(h.point.y - expect);
-        if (best === null || d < Math.abs(best - expect)) best = h.point.y;
+        if (best === null || d < Math.abs(best.point.y - expect)) best = h;
       }
-      return Math.abs(best - expect) > 12 ? null : best;
+      if (Math.abs(best.point.y - expect) > 12) return null;
+      const m = Array.isArray(best.object.material) ? best.object.material[0]
+                                                    : best.object.material;
+      return { y: best.point.y, material: m ? m.name : '' };
+    };
+
+    /** Surface height at (s, n), picking the hit nearest `expect`. */
+    const surfaceAt = (st, n, expect) => {
+      const h = hitAt(st, n, expect);
+      return h === null ? null : h.y;
     };
 
     if (!ground.length) throw new Error('no ground meshes in the height band');
@@ -110,12 +129,38 @@ for (const spec of todo) {
     // side for the car's own width, leaving about 5 m of usable lane either
     // way - enough for the field to race without the corridor spilling onto
     // the apron.
-    const MAX_HALF = 6.5;
+    // Per-track, because it is not one number: the two short circuits are
+    // modelled at 1:15 with an 18 m road, while Yoyleland is a genuinely wide
+    // superspeedway whose inside apron is racing surface. Capping it at the
+    // short-track figure is what used to trim its road wrongly, and is why it
+    // came through the other extraction route in the first place.
+    const MAX_HALF = trackSpec.maxHalf ?? 6.5;
     const MIN_HALF = 1.8;       // never collapse the corridor entirely
+    // `widen` turns on both of the changes Yoyleland needs, and turns them on
+    // *only* for the track that asked. Motor Speedway and Palm Mile verify
+    // clean today off widths that extract_oval's road mask produced; re-deriving
+    // a working circuit is how regressions ship here, and a trial run bore that
+    // out - the material stop alone took Palm's narrowest point from 12.0 m to
+    // 8.05 m, because its pit lane is deliberately *not* in roadMaterials and
+    // the corridor legitimately runs up to it.
+    const widen = trackSpec.widen === true;
+    // Anything not on this list ends the road. Without it the walk strolls
+    // across grass that happens to sit level with the asphalt, which is exactly
+    // what borders Yoyleland's inside line.
+    const ROAD = new Set(widen ? (trackSpec.roadMaterials || []) : []);
     const STEP_TOL = 0.20;      // metres of height change allowed per 0.25 m step
     const BUMPER = 0.5;         // height the sideways barrier ray is fired at
     // Where the cross-section is sampled, as fractions of the half-width.
-    const PROF_FRACTIONS = [-1, -0.5, 0, 0.5, 1];
+    // How many heights are measured across the road, as fractions of the
+    // half-width. Per-track, because the interpolation between them has to
+    // stay inside the bumper clearance of the *real* surface: five samples is
+    // 4.5 m apart on a 1:15 circuit and fine, but 5 m apart across Yoyleland's
+    // 22 m of 18-degree banking, where the chord cuts far enough below a
+    // faceted deck that the final sweep read the road itself as a wall at 237
+    // stations and pinched a third of the lap to the minimum width.
+    const PROF_N = trackSpec.profileSamples ?? 5;
+    const PROF_FRACTIONS = Array.from({ length: PROF_N },
+      (_, i) => -1 + (2 * i) / (PROF_N - 1));
     const N = track.count;
     // Widths come from extract_oval.py's road mask, only capped here: walking
     // outwards by raycast happily wanders onto the apron, which would let the
@@ -129,8 +174,15 @@ for (const spec of todo) {
 
     for (let i = 0; i < N; i++) {
       const st = track.sample(i * track.step, {});
-      const yc = surfaceAt(st, 0, expect);
-      if (yc === null) { misses++; out.y[i] = expect; } else { out.y[i] = yc; expect = yc; }
+      // Seed the guess from the stored height for *this* station, not from the
+      // previous station's answer. A running value is only as good as its worst
+      // sample: one ray that slips onto the flat apron under Yoyleland's
+      // banking hands 0.01 m to the next station as its prior, and the whole
+      // rest of the lap follows it off the road. The stored heights are a
+      // coarse prior - that is what this script exists to replace - but a
+      // coarse prior per station beats a precise one that can be poisoned.
+      const yc = surfaceAt(st, 0, data0.y[i]) ?? surfaceAt(st, 0, expect);
+      if (yc === null) { misses++; out.y[i] = data0.y[i]; } else { out.y[i] = yc; expect = yc; }
 
       // Walk out to the real edge of the road: stop at a step down, at a hole,
       // or at anything standing in the way. The road mask alone is too
@@ -140,10 +192,25 @@ for (const spec of todo) {
       const edge = (sign) => {
         let last = 1.0;
         let prevY = out.y[i];
+        let duff = 0;
         for (let d = 0.5; d <= MAX_HALF; d += 0.25) {
-          const h = surfaceAt(st, sign * d, prevY);
-          if (h === null) break;                       // no surface at all
-          if (Math.abs(h - prevY) > STEP_TOL) break;   // a step or a drop
+          const s = hitAt(st, sign * d, prevY);
+          const bad = s === null                          // no surface at all
+            || Math.abs(s.y - prevY) > STEP_TOL           // a step or a drop
+            || (ROAD.size && !ROAD.has(s.material));      // or simply not road
+          if (bad) {
+            // One duff sample is a seam, not an edge. These circuits are built
+            // from separate meshes for the asphalt and its painted lines, and
+            // a ray dropped exactly on a join slips between them and lands on
+            // the flat apron a metre below. Read as a step, that stopped the
+            // walk two metres from the centreline at a third of Yoyleland's
+            // stations. A real edge is still an edge two samples later; the
+            // most this can skip over is half a metre.
+            if (++duff <= 2) continue;
+            break;
+          }
+          duff = 0;
+          const h = s.y;
           // Anything standing between the last sample and this one, at bumper
           // height, is a wall. The ray follows the surface so it does not
           // simply hit the banking climbing away from it.
@@ -172,8 +239,25 @@ for (const spec of todo) {
         }
         return Math.max(MIN_HALF, last);
       };
-      out.outW[i] = Math.min(data0.outW[i], edge(1));
-      out.inW[i] = Math.min(data0.inW[i], edge(-1));
+      // Two directions, and the stored widths always win one of them.
+      //
+      // Normally the walk may only *narrow*: the stored widths came from
+      // extract_oval's road mask, which is trustworthy, and a raycast walk
+      // left to itself wanders onto the apron.
+      //
+      // `widen` lets it only *widen*, and is for Yoyleland, whose widths came
+      // from the overhead extraction and are several metres tighter than the
+      // asphalt at some stations. It is one-way for the same reason the other
+      // is: this mesh is a fan build whose asphalt, painted lines and finish
+      // line are separate meshes with hairline seams between them, and a walk
+      // that believes every sample gets truncated at a seam. Letting it cut
+      // pinched 169 stations below 12 m on a road that is uniformly 16 to 22.
+      // So the committed corridor is the floor, and all this can do is find
+      // the road either side of it that nobody was using.
+      out.outW[i] = widen ? Math.max(data0.outW[i], edge(1))
+                          : Math.min(data0.outW[i], edge(1));
+      out.inW[i] = widen ? Math.max(data0.inW[i], edge(-1))
+                         : Math.min(data0.inW[i], edge(-1));
       rawOut[i] = out.outW[i];
       rawIn[i] = out.inW[i];
 
@@ -182,15 +266,35 @@ for (const spec of todo) {
       // forcing one slope through it left cars hovering at the edges however
       // the fit was weighted, and trimming the road back to where a plane did
       // fit just made the circuit too narrow to race on.
+      //
+      // Walk outward from the centreline in both directions, carrying the last
+      // height as the guess for the next - the same walk `edge()` does, and
+      // for the same reason. Starting at one edge with the *centreline's*
+      // height as the guess is fatal on a steeply banked road: at Yoyleland's
+      // 18 degrees the deck at the inside edge is 2.5 m below the centre, so
+      // the flat apron underneath it is nearer to the guess and the ray locks
+      // onto that. It reported the whole superspeedway as flat, and then the
+      // final sweep found a "wall" at 1132 of 1200 stations - which is the
+      // real banking, rising through a corridor that had been told it was
+      // level.
       const half = Math.min(out.outW[i], out.inW[i]);
       const offs = PROF_FRACTIONS.map((f) => f * half);
-      const rel = [];
-      let prev = 0;
-      for (const a of offs) {
-        const h = surfaceAt(st, a, out.y[i] + prev);
-        const r = h === null ? prev : h - out.y[i];
-        rel.push(r);
-        prev = r;
+      const mid = PROF_FRACTIONS.indexOf(0);
+      const rel = new Array(offs.length).fill(0);
+      // A sample that jumps more than the banking possibly could over one
+      // spacing is the apron showing through a seam, not the road. Hold the
+      // last height instead; the along-lap smoothing below erases an isolated
+      // one, and a real change of slope shows up at every station in a row.
+      const spacing = offs.length > 1 ? Math.abs(offs[1] - offs[0]) : 1;
+      const jump = Math.max(0.5, spacing * 0.7);      // ~35 degrees
+      for (const dir of [1, -1]) {
+        let prev = 0;
+        for (let k = mid + dir; k >= 0 && k < offs.length; k += dir) {
+          const h = surfaceAt(st, offs[k], out.y[i] + prev);
+          const r = h === null ? prev : h - out.y[i];
+          rel[k] = Math.abs(r - prev) > jump ? prev : r;
+          prev = rel[k];
+        }
       }
       out.profile.push({ offs, rel });
 
@@ -240,9 +344,14 @@ for (const spec of todo) {
     out.profOffsets = profOffsets;
     out.flatProfile = flat;
     // Keep `bank` as the mid-road cross-slope, for anything still using it.
+    // Measured over the middle half of the road, whatever the sample count -
+    // the pair nearest +/- half a half-width, not fixed indices 1 and 3.
+    const near = (want) => PROF_FRACTIONS
+      .reduce((best, f, k) => (Math.abs(f - want) < Math.abs(PROF_FRACTIONS[best] - want) ? k : best), 0);
+    const kLo = near(-0.5), kHi = near(0.5);
     out.bank = out.profile.map((_, i) => {
-      const lo = cols[1][i], hi = cols[3][i];
-      const span = profOffsets[3] - profOffsets[1];
+      const lo = cols[kLo][i], hi = cols[kHi][i];
+      const span = profOffsets[kHi] - profOffsets[kLo];
       return span > 1e-9 ? Math.atan((hi - lo) / span) : 0;
     });
     // Smooth for a clean edge, but never wider than measured: smoothing alone
@@ -263,34 +372,55 @@ for (const spec of todo) {
     // actually hand to the cars, so what it clears is what they can reach.
     const EDGE = 1.6;           // Track.limit's margin for the car's own width
     const CLEAR = 0.1;          // keep the limit this far short of the wall
-    // Measure against the surface just derived, not the one loaded at the top.
-    // `track` still carries the overhead extraction's heights - the very thing
-    // this script exists to replace - and on Palm Mile those sit up to a metre
-    // under the road, which puts a bumper-height ray inside the asphalt and
-    // reports the track itself as a wall.
-    const refined = new Track({
-      ...track.data, y: out.y, bank: out.bank, outW: out.outW, inW: out.inW,
-      profOffsets: out.profOffsets, profile: out.flatProfile,
-    });
+    //
+    // Every height here comes from a downward raycast, exactly as `edge()`
+    // does - not from the model just fitted, and not from `track`, whose
+    // heights are the overhead extraction's and sit up to a metre under Palm
+    // Mile's road.
+    //
+    // Using the fitted model was the previous approach and it is subtly wrong:
+    // the profile is a chord of a dozen points across a faceted, banked road,
+    // so wherever it sits a few centimetres low the bumper ray runs *inside
+    // the asphalt* and the road reports itself as a wall. On Yoyleland that
+    // invented 102 walls, and because `minWindow` spreads each cut over nine
+    // stations it pinched a third of the lap to the minimum width. Whether the
+    // model matches the road is a real question, but it is verify_track's
+    // question - this pass is only looking for things standing on it.
+    //
+    // Only X and Z are taken from `track.position`, and those do not depend on
+    // any height.
+    // Swept outward from the centreline in both directions, never inward from
+    // an edge. Same reason the profile is measured that way: on an 18-degree
+    // bank the deck at the inside edge is 2.5 m below the centreline, so a
+    // sweep seeded there with the centre's height locks onto the flat apron
+    // underneath - and then the real banking, rising back through the ray,
+    // reads as a wall at essentially every station.
     const wall = (i) => {
-      const st = refined.sample(i * refined.step, {});
+      const st = track.sample(i * track.step, {});
       const lo = -(out.inW[i] - EDGE);
       const hi = out.outW[i] - EDGE;
       if (hi <= lo) return null;
-      for (let n = lo; n < hi - 1e-6; n += 0.25) {
-        const b = Math.min(n + 0.25, hi);
-        refined.position(st, n, a);
-        a.addScaledVector(refined.normal(st, nrm, n), BUMPER);
-        refined.position(st, b, bpt);
-        bpt.addScaledVector(refined.normal(st, nrm, b), BUMPER);
-        dir.copy(bpt).sub(a);
-        const span = dir.length();
-        if (span < 1e-6) continue;
-        ray.set(a, dir.normalize());
-        ray.far = span;
-        const hit = ray.intersectObjects(ground, false).length > 0;
-        ray.far = 400;
-        if (hit) return n;
+      for (const way of [1, -1]) {
+        const stop = way > 0 ? hi : lo;
+        if (way > 0 ? stop <= 0 : stop >= 0) continue;
+        let prevY = out.y[i];
+        for (let n = 0; way > 0 ? n < stop - 1e-6 : n > stop + 1e-6; n += way * 0.25) {
+          const b = way > 0 ? Math.min(n + 0.25, stop) : Math.max(n - 0.25, stop);
+          const by = surfaceAt(st, b, prevY) ?? prevY;
+          track.position(st, n, a);
+          a.y = prevY + BUMPER;
+          track.position(st, b, bpt);
+          bpt.y = by + BUMPER;
+          prevY = by;
+          dir.copy(bpt).sub(a);
+          const span = dir.length();
+          if (span < 1e-6) continue;
+          ray.set(a, dir.normalize());
+          ray.far = span;
+          const hit = ray.intersectObjects(ground, false).some((x) => x.distance > 0.05);
+          ray.far = 400;
+          if (hit) return n;
+        }
       }
       return null;
     };
@@ -313,6 +443,13 @@ for (const spec of todo) {
     });
     out.outW = minWindow(cutOut, 4);
     out.inW = minWindow(cutIn, 4);
+    if (widen) {
+      // The sweep may take back what the walk added, but it may not cut into
+      // the corridor the circuit already shipped and races on. A phantom wall
+      // here would otherwise pinch nine stations at a stroke.
+      out.outW = out.outW.map((v, i) => Math.max(v, data0.outW[i]));
+      out.inW = out.inW.map((v, i) => Math.max(v, data0.inW[i]));
+    }
     out.trimmed = trimmed;
 
     const deg = out.bank.map((b) => b * 180 / Math.PI);

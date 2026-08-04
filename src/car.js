@@ -21,7 +21,14 @@ export const MAX_PSI = 0.87;          // ~50 degrees; the arcade model's clamp
 export class Car {
   constructor(spec, model, track, physics = PHYSICS.arcade) {
     this.spec = spec;
-    this.track = track;
+    this.track = track;              // the circuit: owns laps and race order
+    // The ribbon the car is driving on. Normally the circuit; on a pit stop a
+    // PitRoad, which implements the same surface interface. Keeping the two
+    // apart is what stops a pit stop from ever becoming a lap-counting bug -
+    // the same split that lets three handling models share one integrator.
+    this.road = track;
+    this.onPit = false;
+    this.pitBase = 0;                // lap offset while on the pit road
     this.model = model;              // THREE.Object3D, already normalised
     this.physics = physics;
     this.isPlayer = false;
@@ -53,6 +60,8 @@ export class Car {
     this.gear = 0;
     this.draft = 0;                  // 0..1, how deep in someone's tow
     this.assist = 1;                 // grip multiplier, raised on Easy
+    this.tyre = 1;                   // tyre life, 1 fresh to 0 worn out
+    this.wearRate = 0;               // per metre; 0 disables wear entirely
     this.topSpeed = 78;              // m/s, overridden per difficulty
     this.accelLat = 0;               // for body roll
     this.accelLong = 0;              // for brake dive
@@ -65,6 +74,8 @@ export class Car {
 
   /** Place the car on the grid, `back` metres behind the start line. */
   placeOnGrid(back, lane) {
+    this.road = this.track;
+    this.onPit = false;
     this.s = this.track.wrap(-back);
     this.n = lane;
     this.psi = 0;
@@ -80,12 +91,30 @@ export class Car {
     this.steer = 0;
     this.progress = -back;
     this.lap = 1;
+    this.tyre = 1;
     this.finished = false;
     this.sync();
   }
 
+  /**
+   * Move the car onto another ribbon - into the pits, or back out.
+   *
+   * The two overlap in space wherever this is allowed, so nothing jumps: the
+   * pit road merges into the racing surface at both ends and the handover
+   * happens inside that overlap.
+   */
+  useRoad(road, s, n) {
+    this.road = road;
+    this.s = s;
+    this.n = n;
+    this.onPit = road !== this.track;
+    // Anchor the mapping so `progress` is continuous across the handover.
+    if (this.onPit) this.pitBase = this.progress - road.lapAt(s);
+    this.sync();
+  }
+
   step(dt) {
-    const track = this.track;
+    const track = this.road;
     const st = track.sample(this.s, this.st);
     const wasSpeed = this.speed;
     const wasPsi = this.psi;
@@ -104,7 +133,11 @@ export class Car {
     const across = this.speed * Math.sin(this.psi) + this.vy;
     const ds = along * track.arcScale(st, this.n) * dt;
     this.s = track.wrap(this.s + ds);
-    this.progress += ds;
+    // On the pit road, progress is *mapped* rather than accumulated: the pit
+    // lane is a chord and the lap is an arc, so paying out its own metres
+    // would hand a place to anybody who stopped. See PitRoad.lapAt.
+    this.progress = this.onPit ? this.pitBase + track.lapAt(this.s)
+                               : this.progress + ds;
     this.n += across * dt;
 
     // What the body is feeling, so every model drives the visuals the same
@@ -142,8 +175,25 @@ export class Car {
     // Cars line up behind the line, so progress starts negative and the first
     // crossing does not advance the counter - lap 1 is the one being driven
     // from the green light until they come back round.
+    // Laps belong to the circuit, never to whatever ribbon the car is on.
     this.lap = THREE.MathUtils.clamp(
-      Math.floor(this.progress / track.lapLength) + 1, 1, this.totalLaps);
+      Math.floor(this.progress / this.track.lapLength) + 1, 1, this.totalLaps);
+
+    // --- tyre wear ---------------------------------------------------------
+    // Charged per metre and per unit of cornering load, so a driver who leans
+    // on them wears them faster than one who does not - which is the only
+    // thing that makes a stop a decision rather than a timer. Not charged in
+    // the pit lane: crawling down it must not cost what it is there to fix.
+    if (this.wearRate > 0 && !this.onPit) {
+      // Squared load would be more realistic and is far too sharp here: at
+      // 2.5 g it wears seven times as fast as cruising, and a player running
+      // at the limit on a banked superspeedway burned a set every other lap.
+      // Linear tops out at about twice, which is enough for "lean on them and
+      // you will stop sooner" to be a real decision without being a leash.
+      const load = Math.min(2.5, Math.abs(this.accelLat) / 9.81);
+      const along = Math.abs(this.speed) * dt;
+      this.tyre = Math.max(0, this.tyre - this.wearRate * along * (1 + 0.5 * load));
+    }
 
     this.accelLong = (this.speed - wasSpeed) / dt;
     // Sideways movement and a wall rub always squeal. A model may report more
@@ -155,10 +205,10 @@ export class Car {
   }
 
   /** Push the physics state into the three.js model. */
-  sync(st = this.track.sample(this.s, this.st)) {
-    this.track.position(st, this.n, this.position);
+  sync(st = this.road.sample(this.s, this.st)) {
+    this.road.position(st, this.n, this.position);
     this.model.position.copy(this.position);
-    this.track.orient(st, this.psi, this._q, this.n);
+    this.road.orient(st, this.psi, this._q, this.n);
     this.model.quaternion.copy(this._q);
   }
 

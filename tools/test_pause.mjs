@@ -113,7 +113,13 @@ await page.screenshot({ path: join(OUT, 'pause_switched.png') });
 await page.click('#btn-restart');
 await page.waitForFunction("window.game.race && window.game.race.state === 'racing'", { timeout: 180000 });
 await page.evaluate(() => { window.game.input.state.gas = true; });
-await sleep(8000);
+// Wait for the car to be moving rather than waiting a fixed time. Race.update
+// advances at most MAX_STEPS of 1/120 s per frame, so under SwiftShader - which
+// draws these circuits at a couple of frames a second - eight seconds of wall
+// clock is about one second of racing, and whether that clears 30 km/h depends
+// on the frame rate rather than on anything being right.
+await page.waitForFunction('window.game.race.player.speedKmh > 30',
+  { timeout: 240000, polling: 500 }).catch(() => {});
 const restarted = await page.evaluate(() => ({
   track: window.game.settings.track,
   lapLength: Math.round(window.game.track.lapLength),

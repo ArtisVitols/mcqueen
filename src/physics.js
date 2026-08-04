@@ -97,6 +97,26 @@ const GRIP_CAP = 45;                  // m/s^2, about 4.5 g
  * why the high line genuinely grips better while the low line stays shorter.
  * That trade-off is the whole reason the profile is measured per lane.
  */
+/**
+ * Worn tyres grip less - and that is all they do.
+ *
+ * The bar runs 1 to 0 and grip scales from full down to TYRE_FLOOR, which is
+ * a lift more in the corners and a slower lap. Deliberately nothing else: no
+ * snap, no instability, no surprise. Under Arcade the car still cannot spin,
+ * so a five-year-old on worn tyres is slower and never in trouble, which is
+ * the rule this project is built on.
+ *
+ * It is folded into the same multiplier as `car.assist`, so it reaches every
+ * handling model through the one function they all share and cannot introduce
+ * a discontinuity of its own.
+ */
+const TYRE_FLOOR = 0.75;
+
+export function tyreGrip(car) {
+  const t = car.tyre === undefined ? 1 : car.tyre;
+  return car.assist * (TYRE_FLOOR + (1 - TYRE_FLOOR) * t);
+}
+
 function gripLimit(v, bank, assist = 1) {
   const mu = (MU_MECH + MU_AERO * (v / V_AERO) ** 2) * assist;
   // Standard banked-corner limit. It genuinely goes to infinity once
@@ -110,10 +130,10 @@ function gripLimit(v, bank, assist = 1) {
 function cornerSpeedAt(car, st, n) {
   const kappa = Math.abs(st.kappa);
   if (kappa < 1e-6) return Infinity;
-  const bank = car.track.slope(st, n);
+  const bank = car.road.slope(st, n);
   let v = car.topSpeed;
   for (let i = 0; i < 4; i++) {
-    v = Math.sqrt(gripLimit(v, bank, car.assist) / kappa);
+    v = Math.sqrt(gripLimit(v, bank, tyreGrip(car)) / kappa);
   }
   return v;
 }
@@ -181,8 +201,8 @@ const sport = {
 
   drive(car, st, dt) {
     const v = Math.max(car.speed, 0.001);
-    const bank = car.track.slope(st, car.n);
-    const grip = gripLimit(v, bank, car.assist);
+    const bank = car.road.slope(st, car.n);
+    const grip = gripLimit(v, bank, tyreGrip(car));
 
     // --- steering ---------------------------------------------------------
     // Braking loads the front and helps it turn in; power unloads it. This is
@@ -318,8 +338,8 @@ const pro = {
     // sideways with the friction circle leaving nothing to drive with.
     const vRef = Math.max(car.speed, P_V_REF);
     const fade = Math.min(1, car.speed / 6);
-    const bank = car.track.slope(st, car.n);
-    const grip = gripLimit(v, bank, car.assist);
+    const bank = car.road.slope(st, car.n);
+    const grip = gripLimit(v, bank, tyreGrip(car));
     // A fixed-ratio rack, like a real car. It used to be tied to the grip -
     // never asking the tyres for more than they had - which is a driving aid
     // however it is dressed up, and this model is meant not to have one.
@@ -516,7 +536,7 @@ export function driverAid(car, amount, dt, field = null) {
   if (amount > 0) {
     let allowed = Infinity;
     for (const ahead of AID_LOOK) {
-      car.track.sample(car.s + ahead, st);
+      car.road.sample(car.s + ahead, st);
       const limit = car.physics.cornerSpeed(car, st, car.n);
       if (!(limit < Infinity)) continue;
       // Fastest we may be going now and still be down to `limit` by then.
@@ -533,9 +553,9 @@ export function driverAid(car, amount, dt, field = null) {
   }
 
   const want = car.steerCmd;
-  car.track.sample(car.s, st);
-  const lo = car.track.limit(st, -1);
-  const hi = car.track.limit(st, 1);
+  car.road.sample(car.s, st);
+  const lo = car.road.limit(st, -1);
+  const hi = car.road.limit(st, 1);
 
   if (Math.abs(want) > 0.02) {
     // Steering. Give the driver a crossing rate, and stop feeding it in once

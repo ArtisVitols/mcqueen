@@ -8,13 +8,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>McQueen Speedway</title>
-<link rel="stylesheet" href="styles.css?v=20260803-1803-f85a825">
+<link rel="stylesheet" href="styles.css?v=20260804-0935-319a54c">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>">
 <!-- Stamped by tools/stamp_version.py on every deploy. GitHub Pages serves
      everything with max-age=600, so without this a phone can hold a new
      track-data.json alongside the previous track.glb for ten minutes - which
      is exactly how you end up with cars floating over a flattened road. -->
-<script>window.__BUILD__ = '20260803-1803-f85a825';</script>
+<script>window.__BUILD__ = '20260804-0935-319a54c';</script>
 <script type="importmap">
 {
   "imports": {
@@ -151,6 +151,13 @@
     <span class="hud-label">KM/H</span>
     <span id="gear" class="hud-gear hidden"></span>
   </div>
+  <!-- Tyre life. Green to red, and a PIT prompt once they are worn out.
+       Hidden on circuits with no pit road to drive into. -->
+  <div id="tyres" class="hud-box hud-tyres hidden">
+    <span class="hud-label">TYRES</span>
+    <span class="tyre-track"><b id="tyre-bar"></b></span>
+    <span id="tyre-call" class="tyre-call hidden">PIT!</span>
+  </div>
   <div id="lights" class="hidden">
     <div class="bulb"></div><div class="bulb"></div><div class="bulb"></div>
     <div class="bulb"></div><div class="bulb"></div>
@@ -187,14 +194,21 @@
 </div>
 
 <!-- rotate nag ------------------------------------------------------------ -->
+<!-- Two states. Portrait asks for the phone to be turned; landscape offers
+     fullscreen, because Chrome will not grant it from an orientationchange -
+     rotating is not a user activation - and a tap is. -->
 <div id="rotate" class="hidden">
-  <div>
+  <div class="rotate-nag">
     <!-- Drawn in CSS rather than as an emoji so it renders on every device. -->
     <div class="phone-icon"></div>
     Turn your phone sideways
   </div>
+  <div class="rotate-full">
+    <div class="expand-icon"></div>
+    Tap for fullscreen
+  </div>
 </div>
 
-<script type="module" src="src/main.js?v=20260803-1803-f85a825"></script>
+<script type="module" src="src/main.js?v=20260804-0935-319a54c"></script>
 </body>
 </html>

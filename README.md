@@ -20,12 +20,33 @@ tap 2 PLAYERS instead - see below.
   flat-out player.
 - The wheels turn at road speed, the front pair steers, and the body leans into
   the corners and noses down under braking.
+- Turn the phone to landscape and it goes fullscreen; if the browser wants a
+  tap first, it asks for one.
+
+## Pit stops
+
+Above the speed there is a **tyre bar**. It starts green and drains to red as
+the tyres wear - faster if you lean on them through the corners.
+
+When it turns red, **PIT!** appears. As you come past the pit entrance the bar
+shows **PIT ◀**: steer down to the inside and the car peels off into the pit
+lane, obeys the speed limit, and stops on the yellow box. **Guido** drives out
+and goes round all four wheels, then heads back to the wall and you rejoin on
+fresh tyres. **Mack** is parked alongside, watching.
+
+On Easy the car takes itself in, so holding the throttle down is still all you
+have to do. The other cars pit too, so a stop costs you nothing you do not get
+back.
+
+A five-lap race needs no stop. Ten laps needs one, twenty needs three - which
+is what the longer race lengths are for.
 
 ## The museum
 
 **MUSEUM** on the menu opens a showroom: each car on a lit plinth, turning
 slowly. Drag to spin it round, pinch to zoom, and use the arrows to step
-through all seven.
+through all nine - the seven racers plus Guido and Mack, who do not race but
+are worth a look.
 
 ## Two players
 
@@ -123,7 +144,11 @@ index.html  styles.css          the whole app shell
 src/track.js                    centreline spline, track space <-> world
 src/car.js                      a car in track space; owns the invariants
 src/physics.js                  the three handling models, and the driver aid
-src/wheels.js                   splits four wheels out of each car, spins them
+src/wheels.js                   splits the wheels out of each car, spins them
+src/pits.js                     the pit road, as a second ribbon
+src/pitstop.js                  driving in, stopping, being serviced, leaving
+src/pitcrew.js                  Guido going round the wheels, and Mack parked
+src/museum.js                   the showroom
 src/ai.js                       opponent drivers: lanes, drafting, grudges
 src/race.js                     grid, countdown, running order, finish
 src/net.js, src/net/            two-player protocol and its three transports
@@ -152,6 +177,7 @@ python3 tools/extract_track.py             # -> assets/track-data.json
 node  tools/topdown.mjs raw/x.glb palm     # -> build/palm_{colour,height,id}.png
 python3 tools/extract_oval.py palm         # -> assets/track-palm.json
 node  tools/refine_track.mjs palm          # heights/banking by raycasting the asset
+node  tools/extract_pits.mjs palm          # ... and its pit road, as a second ribbon
 
 python3 tools/inspect_track.py raw/x.glb   # materials, scale, overhead map
 node  tools/probe_points.mjs raw/x.glb 1,2 # what is actually at a world point
@@ -160,10 +186,13 @@ node  tools/simulate.mjs all       # headless races: physics x track x difficult
 node  tools/trace_lap.mjs msots sport   # why a lap was slow, half-second by half-second
 node  tools/verify_track.mjs       # shipped tracks vs physics data - run this!
 node  tools/check_ride_height.mjs  # gap between each car and the road
-node  tools/check_wheels.mjs       # four wheels per car, and proof they turn
+node  tools/check_wheels.mjs       # every wheel found, and proof they turn
 node  tools/check_steering.mjs     # does it steer, and does the field weave?
 node  tools/check_racing.mjs       # how hard is it actually to overtake?
 node  tools/check_museum.mjs       # every car on the plinth, and the race after
+node  tools/check_pits.mjs         # pit roads on asphalt, and a stop end to end
+node  tools/shots_pits.mjs yoyle   # ... and a picture of Guido doing it
+node  tools/check_fullscreen.mjs   # rotate to landscape, and the tap fallback
 node  tools/check_netplay.mjs      # host and guest agree, at four latencies
 node  tools/check_twoplayer.mjs    # two real tabs through the real menus
 node  tools/shots.mjs              # drive the real game in headless Chrome

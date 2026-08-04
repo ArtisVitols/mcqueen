@@ -16,10 +16,12 @@ import * as THREE from 'three';
 
 const PLINTH_R = 3.4;
 const MIN_DIST = 3.2;         // how close a pinch may get
-const MAX_DIST = 12;
+const MAX_DIST = 12;          // ... and how far, for a car-sized exhibit
+const CAR_REACH = 4.6;        // what the room was proportioned for
 const MIN_PITCH = 0.04;       // radians above the floor
 const MAX_PITCH = 1.15;       // ... and short of straight down
 const SPIN = 0.12;            // idle turntable, rad/s
+const FOG_DENSITY = 0.022;    // at k = 1; thinned for a bigger room
 
 export class Museum {
   /**
@@ -37,6 +39,7 @@ export class Museum {
     this.yaw = Math.PI * 0.22;
     this.pitch = 0.30;
     this.dist = 7.4;
+    this.maxDist = MAX_DIST;       // raised for an exhibit bigger than a car
     this.spin = true;              // turns by itself until you touch it
     this.saved = null;
     this._aim = new THREE.Vector3(0, 0.55, 0);
@@ -47,9 +50,11 @@ export class Museum {
     const g = new THREE.Group();
     g.name = 'museum';
 
-    // A dark polished floor. Big enough that its edge is never in shot.
+    // A dark polished floor. Big enough that its edge is never in shot -
+    // which now has to hold for Mack, who is four car-lengths long and is
+    // looked at from four times as far back.
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(60, 64),
+      new THREE.CircleGeometry(160, 64),
       new THREE.MeshStandardMaterial({ color: 0x0d1017, roughness: 0.35, metalness: 0.5 }),
     );
     floor.rotation.x = -Math.PI / 2;
@@ -64,6 +69,7 @@ export class Museum {
     plinth.position.y = -0.11;          // top face flush with y = 0
     plinth.receiveShadow = true;
     g.add(plinth);
+    this.plinth = plinth;
 
     const rim = new THREE.Mesh(
       new THREE.RingGeometry(PLINTH_R - 0.06, PLINTH_R + 0.02, 64),
@@ -73,16 +79,17 @@ export class Museum {
     rim.rotation.x = -Math.PI / 2;
     rim.position.y = 0.012;
     g.add(rim);
+    this.rim = rim;
 
     // A curved backdrop, lit from below, so there is no horizon line and the
     // room reads as a room rather than a plane in the void.
     const wall = new THREE.Mesh(
-      new THREE.CylinderGeometry(26, 26, 26, 48, 1, true),
+      new THREE.CylinderGeometry(70, 70, 70, 48, 1, true),
       new THREE.MeshStandardMaterial({
         color: 0x151b28, roughness: 0.9, metalness: 0.0, side: THREE.BackSide,
       }),
     );
-    wall.position.y = 12;
+    wall.position.y = 33;
     g.add(wall);
 
     // Three-point-ish lighting: a key from the front quarter, a cool rim from
@@ -111,6 +118,19 @@ export class Museum {
     fill.position.set(-4.5, 2.4, 5);
     g.add(fill);
 
+    // Kept so `frame()` can move them out with the exhibit. A rig placed for
+    // a 4.4 m car sits *inside* an 18 m truck, lighting one wheel arch.
+    this.lights = [key, rimLight, fill].map((l) => ({
+      light: l,
+      pos: l.position.clone(),
+      target: l.target ? l.target.position.clone() : null,
+      distance: l.distance,
+      intensity: l.intensity,
+      shadowFar: l.shadow ? l.shadow.camera.far : 0,
+      normalBias: l.shadow ? l.shadow.normalBias : 0,
+    }));
+    this._k = 1;
+
     g.add(new THREE.HemisphereLight(0x4a5878, 0x0a0c11, 0.55));
     return g;
   }
@@ -132,7 +152,7 @@ export class Museum {
     if (trackScene) trackScene.visible = false;
     this.trackScene = trackScene;
     this.scene.background = new THREE.Color(0x090c12);
-    this.scene.fog = new THREE.FogExp2(0x090c12, 0.022);
+    this.scene.fog = new THREE.FogExp2(0x090c12, FOG_DENSITY / this._k);
     this.camera.fov = 42;
     this.camera.up.set(0, 1, 0);
     this.camera.updateProjectionMatrix();
@@ -171,9 +191,44 @@ export class Museum {
     // crops him or leaves the low cars tiny.
     if (size) {
       const reach = Math.max(size.x, size.z, size.y * 1.6);
-      this.dist = THREE.MathUtils.clamp(reach * 1.55, MIN_DIST, MAX_DIST);
+      this.frame(Math.max(1, reach / CAR_REACH));
+      // A car-sized exhibit keeps the old limit exactly; Mack needs four
+      // times it or the camera cannot get far enough back to see him.
+      this.maxDist = Math.max(MAX_DIST, reach * 2.4);
+      this.dist = THREE.MathUtils.clamp(reach * 1.55, MIN_DIST, this.maxDist);
       this._aim.y = Math.max(0.45, size.y * 0.45);
     }
+  }
+
+  /**
+   * Scale the room to the exhibit.
+   *
+   * The floor and backdrop are already big enough for anything here, so only
+   * the plinth and the lighting move - a rig placed for a 4.4 m car sits
+   * *inside* an 18 m truck and lights one wheel arch. The car is never scaled.
+   */
+  frame(k) {
+    if (this._k === k) return;
+    this._k = k;
+    this.plinth.scale.set(k, 1, k);
+    this.rim.scale.setScalar(k);
+    for (const l of this.lights) {
+      l.light.position.copy(l.pos).multiplyScalar(k);
+      if (l.target) l.light.target.position.copy(l.target).multiplyScalar(k);
+      l.light.distance = l.distance * k;
+      // Inverse-square falloff: holding the brightness at the subject while
+      // moving the lamp away means raising it with the square of the distance.
+      l.light.intensity = l.intensity * k * k;
+      if (l.light.shadow) {
+        l.light.shadow.camera.far = l.shadowFar * k;
+        // A world-space nudge, so it has to grow with the room or the acne
+        // the plinth is prone to comes straight back.
+        l.light.shadow.normalBias = l.normalBias * k;
+      }
+    }
+    // Only once the fog is ours - `open()` puts the race's aside first, and
+    // dimming that one would fog the circuit.
+    if (this.saved && this.scene.fog) this.scene.fog.density = FOG_DENSITY / k;
   }
 
   /** One finger: turn the car. Two: pinch to zoom. */
@@ -185,7 +240,7 @@ export class Museum {
 
   pinch(scale) {
     this.spin = false;
-    this.dist = THREE.MathUtils.clamp(this.dist / scale, MIN_DIST, MAX_DIST);
+    this.dist = THREE.MathUtils.clamp(this.dist / scale, MIN_DIST, this.maxDist);
   }
 
   update(dt) {
@@ -196,7 +251,7 @@ export class Museum {
     const cp = Math.cos(this.pitch);
     this.camera.position.set(
       Math.sin(this.yaw) * cp * this.dist,
-      Math.sin(this.pitch) * this.dist + 0.55,
+      Math.sin(this.pitch) * this.dist + this._aim.y,
       Math.cos(this.yaw) * cp * this.dist,
     );
     this.camera.lookAt(this._aim);

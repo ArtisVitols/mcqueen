@@ -53,6 +53,7 @@ for (const spec of (ids.length ? manifest.filter((t) => ids.includes(t.id)) : ma
     const THREE = await import('three');
     const { loadTrack, assetUrl } = await import('../src/models.js');
     const { Track } = await import('../src/track.js');
+    const { chunkForRays } = await import('./chunk.js');
     const track = await Track.load(assetUrl(trackSpec.data));
     const scene = await loadTrack(trackSpec.model, track.modelScale, undefined,
       trackSpec.asphalt || []);
@@ -61,6 +62,14 @@ for (const spec of (ids.length ? manifest.filter((t) => ids.includes(t.id)) : ma
       const ms = Array.isArray(o.material) ? o.material : [o.material];
       return ms.every((m) => m && (m.opacity === 0 || m.colorWrite === false));
     };
+    // Raycast a flat list of chunked meshes rather than the scene graph.
+    // Yoyleland's fence, grandstands and concrete each ring the circuit, so
+    // their bounding boxes reject nothing and every ray scans 400k triangles.
+    // Same geometry, same answers, minutes instead of an hour.
+    const visible = [];
+    scene.traverse((o) => { if (o.isMesh && !invisible(o)) visible.push(o); });
+    const ground = chunkForRays(visible);
+
     const ray = new THREE.Raycaster();
     ray.far = 600;
     const down = new THREE.Vector3(0, -1, 0);
@@ -94,7 +103,7 @@ for (const spec of (ids.length ? manifest.filter((t) => ids.includes(t.id)) : ma
         if (span < 1e-6) continue;
         ray.set(from, along.normalize());
         ray.far = span;
-        const hit = ray.intersectObject(scene, true).find((h) => !invisible(h.object));
+        const hit = ray.intersectObjects(ground, false)[0];
         if (hit) {
           const m = Array.isArray(hit.object.material) ? hit.object.material[0] : hit.object.material;
           barriers.push({ s: Math.round(s), n: +n.toFixed(1), mat: m?.name });
@@ -109,7 +118,7 @@ for (const spec of (ids.length ? manifest.filter((t) => ids.includes(t.id)) : ma
       for (let n = lo - OVERHANG; n <= hi + OVERHANG + 1e-6; n += 0.5) {
         track.position(st, n, p);
         ray.set(new THREE.Vector3(p.x, p.y + 250, p.z), down);
-        const hits = ray.intersectObject(scene, true).filter((x) => !invisible(x.object));
+        const hits = ray.intersectObjects(ground, false);
         if (!hits.length) { lane.push({ n, y: null }); continue; }
         let road = hits[0];
         for (const h of hits) {

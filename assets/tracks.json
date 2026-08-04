@@ -1,5 +1,5 @@
 {
-  "_comment": "Each track's data file carries a modelScale: the two smaller circuits are modelled at roughly 1:15, and the game scales both the model and the extracted racing line by the same factor so every road is about 18 m wide and the cars stay life-sized. roadMaterials lists the materials that make up the racing surface; tools/verify_track.mjs asserts the surface under the racing line is one of them. asphalt (optional) names materials to restyle as road surface: the Yoyleland tarmac is untextured and washes out to a pale brown under the sun, which hides both the banking and the cars' shadows. gridLanes (optional) pins the two starting columns; normally Race.fitGridLanes measures the corridor across the grid rows and centres them itself.",
+  "_comment": "Each track's data file carries a modelScale: the two smaller circuits are modelled at roughly 1:15, and the game scales both the model and the extracted racing line by the same factor so every road is about 18 m wide and the cars stay life-sized. roadMaterials lists the materials that make up the racing surface; tools/verify_track.mjs asserts the surface under the racing line is one of them. asphalt (optional) names materials to restyle as road surface: the Yoyleland tarmac is untextured and washes out to a pale brown under the sun, which hides both the banking and the cars' shadows. gridLanes (optional) pins the two starting columns; normally Race.fitGridLanes measures the corridor across the grid rows and centres them itself. maxHalf is the widest half-road refine_track.mjs will model, per-track because Yoyleland is a genuinely wide superspeedway and the two 1:15 circuits are not. widen tells refine_track to believe its raycast walk instead of only using it to cap the stored widths - Yoyleland needs it because its widths came from the overhead extraction rather than a road mask, and were up to 7 m tighter than the asphalt. profileSamples is how many heights are measured across the road; five is enough on the 1:15 circuits and far too few across Yoyleland's 22 m of 18-degree banking. pitMaterials names the pit lane's own materials where it has any (Motor Speedway's Material.107, Palm Mile's Material.219) - they are deliberately absent from roadMaterials because including them raced the whole field down the pits, but extract_pits.mjs has to be able to see them. pitScan is how far inboard to look for the pit road; Yoyleland's sits nearly 100 m in. pitBoxMaterials names what sits behind the pit lane (the boxes); it is what distinguishes a pit lane from the inner apron it shares a material with, since both are level with the road and the apron runs the whole lap. pitMinWidth separates them by size: the apron is 6-7 m, a pit lane 16-17 m.",
   "tracks": [
     {
       "id": "msots",
@@ -14,7 +14,16 @@
         "Material.076",
         "Material.110"
       ],
-      "maxOutlierFraction": 0.01
+      "maxOutlierFraction": 0.01,
+      "maxHalf": 6.5,
+      "pitMaterials": [
+        "Material.107"
+      ],
+      "pitScan": 40,
+      "pitBoxMaterials": [
+        "Material.100"
+      ],
+      "pitMinWidth": 12
     },
     {
       "id": "palm",
@@ -30,7 +39,14 @@
         "Material.225",
         "Material.226"
       ],
-      "maxOutlierFraction": 0.01
+      "maxOutlierFraction": 0.01,
+      "maxHalf": 6.5,
+      "pitMaterials": [
+        "Material.219"
+      ],
+      "pitScan": 40,
+      "pitMinWidth": 13,
+      "pitByWidth": true
     },
     {
       "id": "yoyle",
@@ -52,7 +68,12 @@
         "Asphalt",
         "Asphalt.001",
         "Asphalt.002"
-      ]
+      ],
+      "maxHalf": 15.0,
+      "widen": true,
+      "profileSamples": 11,
+      "pitMaterials": [],
+      "pitScan": 120
     }
   ]
 }

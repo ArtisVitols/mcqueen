@@ -63,6 +63,28 @@ export class GuestView {
       this.error = null;
       return;
     }
+    // In the pits the host is simply right. `s` there is a distance down the
+    // pit ribbon, not a lap position, so easing towards it with `track.delta`
+    // would interpolate between two different coordinate systems.
+    if (truth.onPit || car.onPit) {
+      Object.assign(car, {
+        n: truth.n, psi: truth.psi, speed: truth.speed, tyre: truth.tyre,
+        progress: truth.progress, lap: truth.lap, place: truth.place,
+        finished: truth.finished,
+      });
+      if (truth.onPit && !car.onPit && this.race.pits) {
+        car.useRoad(this.race.pits.road, truth.s, truth.n);
+      } else if (!truth.onPit && car.onPit) {
+        car.useRoad(this.race.track, truth.s, truth.n);
+      } else {
+        car.s = truth.s;
+      }
+      car.onPit = truth.onPit;
+      car.sync();
+      this.error = null;
+      return;
+    }
+    car.tyre = truth.tyre;
     this.error = {
       s: this.race.track.delta(car.s, truth.s),
       n: truth.n - car.n,
@@ -91,8 +113,13 @@ export class GuestView {
     // once the lights have gone out. The host holds the grid still through the
     // countdown, and a guest that predicts through it has driven most of a lap
     // before the race has started.
+    // ... and only while it is out on the circuit. A car in the pits is not
+    // being driven: it is on a different ribbon, braking to a mark, held
+    // still by the crew. Predicting through that drives it out from under
+    // Guido and hands the correction an error it can never absorb - the same
+    // reason the countdown is excluded, for the same reason.
     const car = race.player;
-    if (!car.finished && race.state === State.RACING) {
+    if (!car.finished && !car.onPit && race.state === State.RACING) {
       input.applyTo(car, dt, race.physics);
       race.driverAidFor?.(car, dt);
       car.step(dt);
@@ -124,6 +151,28 @@ export class GuestView {
       const a = this.prev[i];
       const b = this.next[i];
       if (!a || !b) continue;
+      rival.tyre = b.tyre;
+      // A rival in the pits is on the other ribbon, where `s` means something
+      // else entirely. Interpolating it as a lap position draws the car out
+      // in the middle of the circuit; take the newest packet as it is.
+      if (b.onPit || a.onPit !== b.onPit) {
+        const road = b.onPit ? this.race.pits?.road : this.race.track;
+        if (road) {
+          rival.road = road;
+          rival.onPit = b.onPit;
+          rival.s = b.s;
+          const pst = road.sample(rival.s, this._st);
+          rival.n = THREE.MathUtils.clamp(b.n, road.limit(pst, -1), road.limit(pst, 1));
+          rival.psi = b.psi;
+          rival.speed = b.speed;
+          rival.progress = b.progress;
+          rival.lap = b.lap;
+          rival.place = b.place;
+          rival.finished = b.finished;
+          rival.sync();
+          continue;
+        }
+      }
       // Interpolate along the track, not through the world: two cars either
       // side of the start line are 2 km apart in `s` and touching in fact.
       rival.s = race.track.wrap(a.s + race.track.delta(a.s, b.s) * t);

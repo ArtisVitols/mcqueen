@@ -19,6 +19,9 @@ dl 189IRUhEfCWrb36jJq6KB7agY0WFRvR_i francesco_bernoulli.glb
 dl 1_deQFaSSXjsE0XpQZeWj2O7JlIZshsQF jackson_storm.glb
 dl 1IJE3vNou8K6JqshdZVLscvhYFMHU9Vtt mater.glb
 dl 1z4iN5vIWUhcE7erlPGlgp1zsh8NaVrN- doc_hudson.zip
+# Pit crew and paddock scenery, not racers - see "racer": false in cars.json.
+dl 1hlJxOhn0fqldAlxlrPElEJOUplPfUZY5 guido.glb
+dl 1ccKUss0KPzDvUIXIAWElo0ecXJKIlR4u mack.glb
 dl 19aGhX9W7IiqlQ49xtTzVTBJ_qmjTMT6A speedway.glb
 dl 1LjtNoYQuki08Cjl-4lzOaMB_TvDDgUGo motor_speedway_of_the_south.glb
 dl 1Afjldi0myxASoDico8WBZYHkffamog6J palm_mile_speedway.glb

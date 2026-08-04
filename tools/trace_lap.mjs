@@ -28,6 +28,7 @@ const [trackId = 'msots', physics = 'sport', difficulty = 'easy', secs = '40'] =
 const spec = read('assets/tracks.json').tracks.find((t) => t.id === trackId);
 const track = new Track(read(`assets/${spec.data}`));
 const entries = read('assets/cars.json').cars
+  .filter((s) => s.racer !== false)      // not Guido and Mack: they are pit crew
   .map((s) => ({ spec: s, object: new THREE.Object3D() }));
 const race = new Race(track, entries, { difficulty, laps: 3, physics, car: 'lightning_mcqueen' },
   spec.gridLanes).build('lightning_mcqueen');

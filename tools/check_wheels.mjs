@@ -10,9 +10,10 @@
  *                world space
  *   visually     textured frames of the whole field at four wheel angles
  *
- * It also prints what the detector found - four wheels, their radius, where
- * they sit - so a car that silently ended up with none is visible rather than
- * merely still.
+ * It also prints what the detector found - how many wheels, their radius,
+ * where they sit - so a car that silently ended up with none is visible rather
+ * than merely still. The count is per-model (see EXPECTED): the racers have
+ * four, Guido three and Mack ten.
  *
  *   node tools/check_wheels.mjs [carId ...]
  */
@@ -27,6 +28,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(homedir(), 'mcqueen-shots');
 const CHROME = join(homedir(), '.local/chrome/chrome-headless-shell-linux64/chrome-headless-shell');
 const PORT = 8271;
+
+// How many wheels each model should have. Four unless stated: Guido is a
+// three-wheeled forklift and Mack a five-axle artic.
+const EXPECTED = { guido: 3, mack: 10 };
 
 mkdirSync(OUT, { recursive: true });
 const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1'],
@@ -48,8 +53,11 @@ await page.goto(`http://127.0.0.1:${PORT}/tools/smoke.html`, { waitUntil: 'domco
 const out = await page.evaluate(async (only) => {
   const THREE = await import('three');
   const { loadCar, assetUrl } = await import('../src/models.js');
+  // Racers by default. Guido and Mack have wheels and are checked here, but
+  // an 18 m artic parked in the middle of the contact sheet stands between
+  // the camera and everything else - so they are opt-in by name.
   const specs = (await (await fetch(assetUrl('cars.json'))).json()).cars
-    .filter((c) => !only.length || only.includes(c.id));
+    .filter((c) => (only.length ? only.includes(c.id) : c.racer !== false));
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x93b7d6);
@@ -71,7 +79,7 @@ const out = await page.evaluate(async (only) => {
     object.position.set(x + size.x / 2, 0, 0);
     x += size.x + 0.9;
     scene.add(object);
-    cars.push({ spec, object, wheels });
+    cars.push({ spec, object, wheels, size });
 
     const marks = [];
     if (wheels) {
@@ -138,10 +146,19 @@ const out = await page.evaluate(async (only) => {
   // Close, low and from three-quarters: a tyre is nearly symmetric, so
   // head-on it looks identical at every angle. The rim faces are the only
   // part that shows rotation, and they only show it from the side.
+  //
+  // Stand back in proportion to what is being looked at. The framing was
+  // written for a 4.4 m car and put the camera *inside* Mack, who is 18 m
+  // long - a full-frame close-up of one tyre proves nothing.
+  // Stand back in proportion to the *longest* car in the scene, not the first.
+  // Cars are spread along x but extend along z, straight down the camera's
+  // line of sight, so one long vehicle anywhere in the row fills the frame -
+  // Mack put the lens inside his own front tyre.
   const first = cars[0].object.position.x;
-  const camera = new THREE.PerspectiveCamera(30, 5, 0.1, 200);
-  camera.position.set(first + 4.2, 0.85, 4.6);
-  camera.lookAt(first + 0.2, 0.42, 0.4);
+  const zoom = Math.max(1, Math.max(...cars.map((c) => c.size.z)) / 4.6);
+  const camera = new THREE.PerspectiveCamera(30, 5, 0.1, 400);
+  camera.position.set(first + 4.2 * zoom, 0.85 * zoom, 4.6 * zoom);
+  camera.lookAt(first + 0.2 * zoom, 0.42 * zoom, 0.4 * zoom);
 
   const frames = [];
   for (const turn of [0, 0.08, 0.16, 0.24]) {
@@ -171,7 +188,22 @@ for (const car of out.measured) {
     console.log(`    ${w.front ? 'front' : 'rear '} r=${w.radius.toFixed(3)} ` +
                 `centre=[${w.centre.join(', ')}] axle=[${w.axle.join(', ')}]`);
   }
-  if (car.wheels.length !== 4) { console.log('  ! expected 4 wheels'); failed++; }
+  // Per-car, because the count is not four everywhere any more: Guido is a
+  // three-wheeled forklift and Mack a ten-wheeled artic. Asserting the exact
+  // number still matters - "found some wheels" would pass while quietly
+  // missing an axle.
+  const want = EXPECTED[car.id] ?? 4;
+  if (car.wheels.length !== want) {
+    console.log(`  ! expected ${want} wheels, found ${car.wheels.length}`);
+    failed++;
+  }
+  // Only the front axle steers. On a car that is half the wheels; on Mack it
+  // must be two of ten, or he crab-walks down the pit lane.
+  const steering = car.wheels.filter((w) => w.front).length;
+  if (steering !== 2) {
+    console.log(`  ! ${steering} steered wheel(s) - the front axle should be 2`);
+    failed++;
+  }
 
   console.log('  quarter turn: ' +
     car.moved.map((m) => `${m.side}${m.front ? 'F' : 'R'} ${m.dist} m / ${m.turn} deg`).join('  '));
