@@ -28,9 +28,11 @@ tap 2 PLAYERS instead - see below.
 Above the speed there is a **tyre bar**. It starts green and drains to red as
 the tyres wear - faster if you lean on them through the corners.
 
-When it turns red, **PIT!** appears. As you come past the pit entrance the bar
-shows **PIT ◀**: steer down to the inside and the car peels off into the pit
-lane, obeys the speed limit, and stops on the yellow box. **Guido** drives out
+You can come in **whenever you like** - you do not have to wait for the tyres
+to go off. Each time you pass the pit entrance the bar shows **PIT ◀**: steer
+down to the inside and the car peels off into the pit lane, obeys the speed
+limit, and stops on the yellow box. **PIT!** on its own means the tyres have
+had it and you should come in at the next entrance. One stop per lap. **Guido** drives out
 and goes round all four wheels, then heads back to the wall and you rejoin on
 fresh tyres. **Mack** is parked alongside, watching.
 

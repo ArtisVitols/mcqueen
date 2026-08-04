@@ -982,8 +982,11 @@ class Game {
   /** Per frame: the crew, and the tyre readout. */
   updatePits(race, player, dt) {
     if (race.pits) {
+      // The open entry wins, because it is the one you can act on: "steer left
+      // now". `PIT!` only means the tyres have gone, which is worth knowing
+      // and is not something you can do anything about until the entrance.
       // Left, because the pits are inboard and these ovals run anticlockwise.
-      const call = player.tyre < 0.3 ? 'PIT!' : race.pitOpen(player) ? 'PIT ◀' : null;
+      const call = race.pitOpen(player) ? 'PIT ◀' : player.tyre < 0.3 ? 'PIT!' : null;
       this.hud.setTyre(player.tyre, call);
     }
     if (!this.crew) return;

@@ -118,7 +118,9 @@ await page.evaluate(() => { window.game.input.state.gas = true; });
 // draws these circuits at a couple of frames a second - eight seconds of wall
 // clock is about one second of racing, and whether that clears 30 km/h depends
 // on the frame rate rather than on anything being right.
-await page.waitForFunction('window.game.race.player.speedKmh > 30',
+// Waited to a higher mark than the one asserted below: polling to exactly
+// the threshold lets the read land on 30.0 and round to a failure.
+await page.waitForFunction('window.game.race.player.speedKmh > 45',
   { timeout: 240000, polling: 500 }).catch(() => {});
 const restarted = await page.evaluate(() => ({
   track: window.game.settings.track,

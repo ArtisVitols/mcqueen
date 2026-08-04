@@ -363,6 +363,23 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
 - **One stop per lap.** A car exits onto the inside lane, which is exactly
   where the entry test is watching, so without `pitDone` the player came
   straight back in - ten times in a twelve-lap race.
+- **A person may pit whenever they like; `shouldPit` is the AI's.** Gating a
+  human on tyre wear made the pit entrance ignore them for most of a race,
+  which is not a decision, it is a locked door. Coming in early is allowed to
+  be a bad idea.
+- **... but turning in means *asking*, never merely being near the edge.** On
+  Easy the aid parks the car on the low line, so a proximity test pitted a
+  five-year-old every single lap without them touching anything, and Easy
+  stopped being a win - P1 to P7 at Motor Speedway. The test is
+  `car.steerCmd < -0.2`, or the aid deciding for them.
+- **The guest handles the pits *before* its hard-reset test.** That test
+  measures `track.delta(car.s, truth.s)`, and on the pit ribbon `s` is a
+  distance down a different road - so the moment either end is in the pits it
+  compares two coordinate systems, decides the guest is 300 m out, and "fixes"
+  it by writing a pit distance onto a car still on the circuit. `check_netplay`
+  measures drift in the *world* for the same reason, and the corridor check
+  asks `car.road`, or every car reads as off the road for the length of a
+  stop.
 - **The chase camera follows `car.road`.** Anchored on the circuit while the
   car is in the pits it sits eighty metres away pointing down an empty
   straight, and the car is simply not in shot. `separate`, `room`,

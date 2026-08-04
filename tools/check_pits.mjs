@@ -206,7 +206,7 @@ for (const spec of todo) {
 
   const DT = 1 / 120;
   let t = 0;
-  let sawIn = false, sawStopped = false, sawService = false;
+  let sawIn = false, sawStopped = false, sawService = false, sawEarly = false;
   let worst = 0, offRoad = 0, maxPitSpeed = 0;
   let lowest = 1;
   const firstBox = Math.min(...data.pit.boxes.map((b) => b.d));
@@ -215,8 +215,18 @@ for (const spec of todo) {
   while (race.state !== State.FINISHED && t < 1500) {
     race.update(DT, AIM_LEFT);
     t += DT;
-    lowest = Math.min(lowest, player.tyre);
+    // Measured across the *field*, not the player. The scripted driver here
+    // steers hard left all race, so now that a person may pit whenever they
+    // like it comes in every lap and its tyres never get low - which would
+    // read as 'wear does not work' when it is wear working perfectly and
+    // being reset. The AI pits on strategy, so its minimum is the honest
+    // measure of whether a set actually runs out.
+    for (const c of race.field) if (!c.isPlayer) lowest = Math.min(lowest, c.tyre);
     if (player.pit === 'in') sawIn = true;
+    // Coming in on good tyres, because the driver asked to. This is the
+    // difference between a pit lane you may use whenever you like and one
+    // that unlocks when a number runs out.
+    if (player.pit === 'stopped' && player.tyre > 0.5) sawEarly = true;
     if (player.pit === 'stopped') sawStopped = true;
     if (player.pit === 'service') { sawService = true; if (player.speed > 0.01) worst++; }
     // Measured from the approach to the first box onwards. A car arrives at
@@ -244,11 +254,14 @@ for (const spec of todo) {
   race.state === State.FINISHED
     ? ok(`the race finished (${t.toFixed(0)} s, ${player.pitStops} stop(s) for the player)`)
     : fail('the race never finished - somebody is stuck in the pit lane');
-  lowest < 0.5 ? ok(`tyres wore down to ${(lowest * 100).toFixed(0)}%`)
+  lowest < 0.5 ? ok(`tyres wore down to ${(lowest * 100).toFixed(0)}% before a stop was needed`)
                : fail(`tyres barely wore (lowest ${(lowest * 100).toFixed(0)}%) - no stop is ever needed`);
   sawIn && sawStopped && sawService
     ? ok('drove in, stopped in the box, and was serviced')
     : fail(`never completed a stop (in ${sawIn}, stopped ${sawStopped}, service ${sawService})`);
+  sawEarly
+    ? ok('came in on good tyres - the pits are open whenever you ask')
+    : fail('only ever pitted on worn tyres - the entry is gated on wear');
   worst === 0 ? ok('the car was frozen for the whole stop')
               : fail(`the car moved on ${worst} steps while being serviced`);
   maxPitSpeed <= data.pit.speedLimit + 1.5

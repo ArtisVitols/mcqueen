@@ -256,12 +256,22 @@ export class Race {
       // how it works in the sport - `tryEnter` gates on where the car actually
       // is, so calling it every step costs nothing and needs no button.
       //
-      // On Easy the aid also steers them in, because holding the throttle down
-      // has to be enough to win and it is not if the tyres go off and nobody
-      // ever comes in. Same rule that already makes the aid overtake there.
-      if (this.pits && this.shouldPit(car)) {
-        if ((car.lift ?? 0) >= 0.7) this.aimForPits(car, dt);
-        this.pits.tryEnter(car);
+      // **Whenever they like**, not only when the tyres have gone. `shouldPit`
+      // is a strategy call and belongs to the AI; applying it to a person made
+      // the pit entrance ignore them for most of a race, which is not a
+      // decision, it is a locked door. Coming in early is allowed to be a bad
+      // idea - `pitDone` still limits it to one stop a lap.
+      if (this.pits) {
+        // The aid only steers *itself* in when a stop is actually due, or Easy
+        // would pit every lap for no reason. Same rule that already makes the
+        // aid overtake there.
+        const auto = (car.lift ?? 0) >= 0.7 && this.shouldPit(car);
+        if (auto) this.aimForPits(car, dt);
+        // Turning in is *asking* - holding the button towards the inside -
+        // never merely being near the edge. On Easy the aid parks the car on
+        // the low line, so "close enough" pitted a five-year-old every single
+        // lap without them touching anything, and Easy stopped being a win.
+        if (auto || car.steerCmd < -0.2) this.pits.tryEnter(car);
       }
     }
 

@@ -141,7 +141,15 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
     // How far apart are the two versions of the guest's own car?
     const mine = guest.player;
     const truth = host.field.find((c) => c.spec.id === GUEST_CAR);
-    const drift = Math.abs(guest.track.delta(mine.s, truth.s));
+    // Measured in the *world*, not along the lap.
+    //
+    // `s` is only comparable while both ends are on the same ribbon: in the
+    // pits it is a distance down a different road, so `track.delta` of the two
+    // reads as 320 m when the two cars are a handspan apart. World distance
+    // asks the question this metric is actually about - how far is the car I
+    // am driving from where the host says it is - and it asks it the same way
+    // on either road.
+    const drift = mine.position.distanceTo(truth.position);
     if (host.state === State.RACING) { worst = Math.max(worst, drift); total += drift; samples++; }
     if (process.env.TRACE && Math.floor(t * 2) !== Math.floor((t - DT) * 2)) {
       console.log(`  t=${t.toFixed(1)} state=${host.state} drift=${drift.toFixed(2)} ` +
@@ -151,8 +159,13 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
     }
 
     for (const car of guest.field) {
-      guest.track.sample(car.s, st);
-      if (car.n > guest.track.limit(st, 1) + 0.5 || car.n < guest.track.limit(st, -1) - 0.5) {
+      // Against the corridor of whatever road the car is on. A car in the pits
+      // is legitimately far outside the *circuit's* corridor - that is what a
+      // pit lane is - and measuring it against the wrong one reported the
+      // whole field off the road for the length of every stop.
+      const road = car.road || guest.track;
+      road.sample(car.s, st);
+      if (car.n > road.limit(st, 1) + 0.5 || car.n < road.limit(st, -1) - 0.5) {
         outside++;
       }
     }

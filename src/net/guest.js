@@ -54,18 +54,17 @@ export class GuestView {
     const truth = this.next[me];
     if (!truth) return;
     const car = this.race.player;
-    const off = Math.abs(this.race.track.delta(car.s, truth.s));
-    if (off > HARD_RESET) {
-      Object.assign(car, {
-        s: truth.s, n: truth.n, psi: truth.psi, speed: truth.speed,
-        progress: truth.progress,
-      });
-      this.error = null;
-      return;
-    }
-    // In the pits the host is simply right. `s` there is a distance down the
-    // pit ribbon, not a lap position, so easing towards it with `track.delta`
-    // would interpolate between two different coordinate systems.
+    // The pits come *first*, before the hard-reset test below.
+    //
+    // That test measures `track.delta(car.s, truth.s)`, and on the pit ribbon
+    // `s` is a distance down a different road - so the moment either end is in
+    // the pits it compares two coordinate systems, decides the guest is 300 m
+    // out, and "fixes" it by writing a pit distance onto a car still on the
+    // circuit. That is a genuine teleport, and it is what the reset exists to
+    // prevent rather than cause.
+    //
+    // In the pits the host is simply right: there is nothing to ease towards,
+    // because the car is braking to a mark and then held still by the crew.
     if (truth.onPit || car.onPit) {
       Object.assign(car, {
         n: truth.n, psi: truth.psi, speed: truth.speed, tyre: truth.tyre,
@@ -81,6 +80,17 @@ export class GuestView {
       }
       car.onPit = truth.onPit;
       car.sync();
+      this.error = null;
+      return;
+    }
+    // Anything huge - a spin we did not predict, or a reconnect - is not worth
+    // easing in and is simply taken. Safe here: both ends are on the circuit.
+    const off = Math.abs(this.race.track.delta(car.s, truth.s));
+    if (off > HARD_RESET) {
+      Object.assign(car, {
+        s: truth.s, n: truth.n, psi: truth.psi, speed: truth.speed,
+        progress: truth.progress, tyre: truth.tyre,
+      });
       this.error = null;
       return;
     }
