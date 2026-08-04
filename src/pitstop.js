@@ -24,10 +24,9 @@ export const Pit = {
   OUT: 'out', IN: 'in', STOPPED: 'stopped', SERVICE: 'service', LEAVING: 'leaving',
 };
 
-const STOP_SPEED = 1.2;         // m/s that counts as stopped in the box
-const BOX_REACH = 3.5;          // metres either side of the box centre
-const BOX_LATERAL = 1.2;        // ... and how close across the lane
-const CRAWL = 3.0;              // m/s while still sliding over to it
+const STOP_SPEED = 0.35;        // m/s that counts as stopped in the box
+const BOX_REACH = 1.2;          // metres either side of the box centre
+const STOP_DECEL = 2.6;         // m/s^2 aimed at the mark - a firm, smooth stop
 const SETTLE = 0.35;            // seconds held still before the crew start
 const LANE_HOLD = 1.4;          // how hard a car in the pits holds its lane
 
@@ -139,16 +138,24 @@ export class PitLane {
       // it stopped at n = +3.2 with its box at -3.4, could not steer at zero
       // speed, and sat there for the rest of the race.
       car.steer = laneSteer(car, box.n, dt, LANE_HOLD);
-      // Hold a crawl until it is actually on the box, then stop.
-      const near = Math.abs(car.n - box.n) < BOX_LATERAL;
-      const reached = car.s >= box.d - BOX_REACH;
-      const target = reached && near ? 0 : reached ? CRAWL : this.road.speedLimit;
-      car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.4, 0, 1);
-      car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.25, 0, 1);
-      // Stationary in the box is the test. Not stationary *and* aligned: that
-      // is two conditions where the second cannot be fixed once the first is
-      // true, which is the definition of a deadlock.
-      if (reached && car.speed < STOP_SPEED) {
+
+      // Brake on the distance *remaining*, so the car arrives at rest on the
+      // mark rather than stopping wherever it happens to be slow enough. A
+      // flat "close enough, then brake" left it up to 3.5 m short of its own
+      // box, which is a car-length off a painted rectangle you can see.
+      const left = box.d - car.s;
+      const curve = Math.sqrt(Math.max(0, 2 * STOP_DECEL * left));
+      const target = left <= 0 ? 0 : Math.min(this.road.speedLimit, curve);
+      car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.5, 0, 1);
+      car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.35, 0, 1);
+
+      // Stationary on the mark. The longitudinal test is tight because the
+      // approach above can actually hit it; the lateral one is not a condition
+      // at all, because at zero speed it cannot be fixed - two conditions
+      // where the second is unreachable once the first is true is the
+      // definition of a deadlock, and it cost a whole race once.
+      const onMark = Math.abs(left) < BOX_REACH;
+      if (car.speed < STOP_SPEED && (onMark || car.speed < 0.05)) {
         car.pit = Pit.STOPPED;
         car.pitTimer = 0;
       }

@@ -207,6 +207,7 @@ for (const spec of todo) {
   const DT = 1 / 120;
   let t = 0;
   let sawIn = false, sawStopped = false, sawService = false, sawEarly = false;
+  let stopErr = null, stopErrN = 0;
   let worst = 0, offRoad = 0, maxPitSpeed = 0;
   let lowest = 1;
   const firstBox = Math.min(...data.pit.boxes.map((b) => b.d));
@@ -227,6 +228,14 @@ for (const spec of todo) {
     // difference between a pit lane you may use whenever you like and one
     // that unlocks when a number runs out.
     if (player.pit === 'stopped' && player.tyre > 0.5) sawEarly = true;
+    // How far from the middle of its own painted box did it stop? The box
+    // is 3.4 x 6.4 m, so anything over ~3 m along is a car-length adrift of
+    // a rectangle you can see on the road.
+    if (player.pit === 'stopped' && stopErr === null) {
+      const box = race.pits.road.boxFor(player.gridIndex);
+      stopErr = Math.abs(player.s - box.d);
+      stopErrN = Math.abs(player.n - box.n);
+    }
     if (player.pit === 'stopped') sawStopped = true;
     if (player.pit === 'service') { sawService = true; if (player.speed > 0.01) worst++; }
     // Measured from the approach to the first box onwards. A car arrives at
@@ -262,6 +271,10 @@ for (const spec of todo) {
   sawEarly
     ? ok('came in on good tyres - the pits are open whenever you ask')
     : fail('only ever pitted on worn tyres - the entry is gated on wear');
+  stopErr !== null && stopErr < 1.5 && stopErrN < 2.0
+    ? ok(`stopped on the mark (${stopErr.toFixed(2)} m along, ${stopErrN.toFixed(2)} m across)`)
+    : fail(`stopped ${stopErr === null ? 'nowhere' : stopErr.toFixed(2) + ' m along, '
+            + stopErrN.toFixed(2) + ' m across'} from the box centre`);
   worst === 0 ? ok('the car was frozen for the whole stop')
               : fail(`the car moved on ${worst} steps while being serviced`);
   maxPitSpeed <= data.pit.speedLimit + 1.5

@@ -350,6 +350,28 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   roads run *through* the start/finish - Yoyleland's enters at s = 2394 of a
   2817 m lap - so subtracting raw `s` values goes negative the moment the car
   crosses the line and drops it back to the pit entry mid-lane.
+- **A pit ribbon needs the same smoothing a circuit gets, and then some.**
+  Its offsets come from a 0.5 m raycast scan, and fed straight into a
+  centreline they were 2.2 degrees of yaw per station with peaks over 30 -
+  against a ride-quality bar of 0.1 - which is a car that visibly shakes the
+  whole way down the lane. Three passes, and *what* is filtered matters:
+  - Smooth the **band offsets** before building anything from them.
+  - Smooth the ribbon's **lateral offset**, never its world x/z. A filter on
+    world positions cuts corners, the only corner is the entry taper, and that
+    is exactly where the ribbon has to stay on the road - it took Palm Mile's
+    taper through 170 samples of apron.
+  - Smooth the **tangents separately** from the positions, and renormalise.
+    Where a car sits and which way it points are different requirements: one
+    has to be on the asphalt, the other has to be smooth. Filtering them
+    together fails both. Apart, they disagree by a fraction of a degree, which
+    on a 4.4 m car is invisible.
+  - Do **not** pin the ends to their raw values. It kinks the last segment -
+    21 degrees in one station at the pit exit - and buys nothing, because the
+    end only has to overlap the racing line and `check_pits` allows six metres
+    for that.
+- **Stop by braking on the distance remaining**, `sqrt(2·a·left)`, so the car
+  arrives at rest on the mark. "Close enough, then brake" left it up to 3.5 m
+  short of a painted rectangle you can see; the curve puts it within 4 cm.
 - **Aim at the box from the moment of entry.** `laneSteer` asks for a crossing
   *rate*, so a car that brakes first and moves over second never moves over at
   all: it stopped at n = +3.2 with its box at -3.4, could not steer at zero
@@ -404,6 +426,16 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   where a pitting car is: `s` on the pit ribbon is a distance down a different
   coordinate system, so easing towards it with `track.delta` would interpolate
   between two of them.
+- **Guido drives round a ring, not from wheel to wheel.** Straight lines
+  between corners go through the car. The route is built on a rectangle
+  enclosing the bodywork: every waypoint sits on its perimeter, every move
+  follows that perimeter and turns its corners, and he joins and leaves at the
+  point nearest his spot. A ring is convex and contains the car, so a path
+  that stays on it cannot enter the car - bridging only the changes of *side*
+  still clipped a rear corner on the way home.
+- **Wrap those angles into [0, 2π), do not just force them positive.** A ring
+  corner one whole turn "ahead" reads as 6.65 rad against a span of 2.31 and is
+  skipped, which put a leg straight across the back of the car.
 - Guido serves the **local player only**. Seven forklifts at once is a car
   park, not a pit stop. His route is driven from the render loop and the stop's
   timing does not wait on it - an animation the simulation waited on would make

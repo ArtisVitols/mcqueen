@@ -998,7 +998,10 @@ class Game {
       const corners = rig
         ? rig.wheels.map((w) => player.model.localToWorld(w.centre.clone()))
         : null;
-      this.crew.begin(corners, player.position);
+      // The measured size comes with it, because the standoff has to clear the
+      // *bodywork*: the wheels sit inside the nose and tail, so a route built
+      // from the wheels alone puts him in the bumper.
+      this.crew.begin(corners, player.model, this.models.get(player.spec.id)?.size);
     } else if (!servicing && this.crew.active) {
       this.crew.end();
     }

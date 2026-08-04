@@ -110,8 +110,11 @@ await page.screenshot({ path: join(OUT, `pit_0_fresh_${TRACK}.png`) });
 let state = await advance(200);
 console.log(`  after 200 s: ${JSON.stringify(state)}`);
 await page.screenshot({ path: join(OUT, `pit_1_worn_${TRACK}.png`) });
-state.tyre < 0.75 ? ok(`tyres wearing (${(state.tyre * 100).toFixed(0)}%)`)
-                  : fail(`tyres barely worn after 200 s (${state.tyre})`);
+// Two hundred seconds is under four laps of Palm Mile, the shortest circuit,
+// so the bar is "measurably worn" rather than a fixed fraction - the stop
+// itself is checked below and is what actually matters.
+state.tyre < 0.9 ? ok(`tyres wearing (${(state.tyre * 100).toFixed(0)}%)`)
+                 : fail(`tyres barely worn after 200 s (${state.tyre})`);
 
 // --- catch the stop itself -------------------------------------------------
 // Step in small slices and photograph the first moment the crew are working.
@@ -133,6 +136,7 @@ if (!caught) {
     const g = c.guido;
     return {
       active: c.active, at: c.at, route: c.route.length,
+      wheels: c.isWheel.filter(Boolean).length,
       visible: g ? g.visible : false,
       guido: g ? [+g.position.x.toFixed(1), +g.position.y.toFixed(1), +g.position.z.toFixed(1)] : null,
       mack: c.mack ? c.mack.visible : null,
@@ -141,8 +145,8 @@ if (!caught) {
     };
   });
   console.log(`  crew: ${JSON.stringify(crew)}`);
-  crew && crew.active && crew.route === 4
-    ? ok('Guido is out, with four wheels on his round')
+  crew && crew.active && crew.wheels === 4
+    ? ok(`Guido is out, four wheels on a ${crew.route}-point round`)
     : fail(`the crew are not working: ${JSON.stringify(crew)}`);
   crew && crew.mack ? ok('Mack is parked in the pits') : fail('Mack is not in the pits');
   // He has to be *at the car*, not parked on the far side of the circuit.
@@ -150,6 +154,45 @@ if (!caught) {
   near !== null && near < 25
     ? ok(`Guido is ${near.toFixed(1)} m from the car`)
     : fail(`Guido is ${near} m from the car`);
+
+  // The route must go *around* the car, not through it. Walk every segment of
+  // it in the car's own frame and check no point of the path lands inside the
+  // bodywork - driving through the middle of the car was the whole complaint.
+  const clash = await page.evaluate(() => {
+    const g = window.game;
+    const c = g.crew;
+    const car = g.race.player;
+    const size = g.models.get(car.spec.id).size;
+    const halfW = size.x / 2, halfL = size.z / 2;
+    const fwd = new (Object.getPrototypeOf(car.position).constructor)(0, 0, 1);
+    fwd.applyQuaternion(car.model.quaternion); fwd.y = 0; fwd.normalize();
+    const right = new (Object.getPrototypeOf(car.position).constructor)();
+    right.crossVectors(fwd, new (Object.getPrototypeOf(car.position).constructor)(0, 1, 0));
+    right.normalize();
+    // The whole planned round: out from his spot, every waypoint in order,
+    // and back. Starting from wherever he has got to would trace a line
+    // back through waypoints he has already left behind him.
+    const pts = [c.home.clone(), ...c.route.map((p2) => p2.clone()), c.home.clone()];
+    let worst = Infinity;
+    let inside = 0;
+    for (let i = 1; i < pts.length; i++) {
+      for (let k = 0; k <= 24; k++) {
+        const p2 = pts[i - 1].clone().lerp(pts[i], k / 24).sub(car.position);
+        p2.y = 0;
+        const u = Math.abs(p2.dot(right)) / halfW;
+        const v = Math.abs(p2.dot(fwd)) / halfL;
+        // How far outside the bodywork, as a fraction: <1 on both means inside.
+        const clear = Math.max(u, v);
+        worst = Math.min(worst, clear);
+        if (u < 1 && v < 1) inside++;
+      }
+    }
+    return { inside, worst: +worst.toFixed(3), legs: pts.length - 1 };
+  });
+  clash.inside === 0
+    ? ok(`his route goes round the car (${clash.legs} legs, closest approach ` +
+         `${clash.worst.toFixed(2)} of a half-body)`)
+    : fail(`Guido drives through the car: ${clash.inside} sampled points inside it`);
 
   // A few frames through the service, so his route round it is visible.
   for (let k = 0; k < 3; k++) {

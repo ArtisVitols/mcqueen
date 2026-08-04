@@ -274,6 +274,31 @@ for (const spec of todo) {
     // ribbon starts life *on the racing surface's inside lane* and sweeps
     // inboard to meet the measured band, so the two ribbons overlap in space
     // wherever a handover is allowed and nothing has to teleport.
+    // Smooth the measured band before anything is built from it.
+    //
+    // `pitOut`/`pitIn` come from a 0.5 m raycast scan and jump station to
+    // station; fed straight into a centreline they become 2.2 degrees of yaw
+    // wobble per station with peaks over 30, against a ride-quality bar of
+    // 0.1 - which is a car that visibly shakes all the way down the pit lane.
+    // The circuit's own centreline is low-passed for exactly this reason.
+    const smoothBand = (get, set, half, passes) => {
+      for (let q = 0; q < passes; q++) {
+        const src = bands.map(get);
+        for (let i = best.from; i <= best.to; i++) {
+          let sum = 0, n2 = 0;
+          for (let d2 = -half; d2 <= half; d2++) {
+            const v = src[((i + d2) % N + N) % N];
+            if (v === null || v === undefined) continue;
+            sum += v; n2++;
+          }
+          if (n2) set(bands[((i % N) + N) % N], sum / n2);
+        }
+      }
+    };
+    smoothBand((b) => b.pitOut, (b, v) => { b.pitOut = v; }, 5, 3);
+    smoothBand((b) => b.pitIn, (b, v) => { b.pitIn = v; }, 5, 3);
+    smoothBand((b) => b.width, (b, v) => { b.width = v; }, 5, 3);
+
     const TAPER = trackSpec.pitTaper ?? 70;             // metres of lap
     const taperSt = Math.max(4, Math.round(TAPER / track.step));
     const MARGIN = 1.6;                                 // Track.limit's own margin
@@ -307,8 +332,11 @@ for (const spec of todo) {
       // XZ from the centreline; Y always from a raycast, never from the data.
       track.position(st, n, p);
       const h = hitAt(st, n, bnd.pitY ?? track.data.y[i]);
+      // `lapU` is the *unwrapped* lap distance for this station. It has to be
+      // monotonic across the resample below, and these pit roads run through
+      // the start/finish - a wrapped value jumps a whole lap mid-ribbon.
       raw.push({ x: p.x, z: p.z, y: h ? h.y : track.data.y[i], n, half,
-                 lapS: i * track.step, j });
+                 lapU: j * track.step, lapS: i * track.step, j });
     }
 
     // --- 4. Resample to even arc length, and derive tangents and normals.
@@ -331,15 +359,93 @@ for (const spec of todo) {
       return {
         x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t,
         y: a.y + (b.y - a.y) * t, half: a.half + (b.half - a.half) * t,
+        lapU: a.lapU + (b.lapU - a.lapU) * t, n: a.n + (b.n - a.n) * t,
       };
     };
     const pts = [];
     for (let k = 0; k < STATIONS; k++) pts.push(at(k * stationStep));
+
+    // Low-pass the ribbon's *lateral offset*, then rebuild the line from it.
+    //
+    // Not the world positions. A filter on x and z cuts corners, and the only
+    // corner here is the entry taper - which is exactly where the ribbon has
+    // to stay on the road. Smoothing world space took Palm Mile's taper off
+    // the pit lane and through 170 samples of apron and 53 obstructions.
+    //
+    // The offset is the thing that is actually noisy: it comes from a 0.5 m
+    // raycast scan. Rebuilding `x`/`z` from the circuit's own smooth centreline
+    // at the smoothed offset cannot leave the line the ribbon is meant to
+    // follow, however hard it is filtered.
+    //
+    // The ends are *not* pinned. They were, and forcing the last station back
+    // to its raw offset put a kink in the final segment - 21 degrees of yaw in
+    // one station at the pit exit, which is precisely the shake this filter
+    // exists to remove. The offset there tracks the corridor's inside edge,
+    // which itself varies station to station, so the raw value is not a
+    // landmark worth preserving: what matters is that the end still overlaps
+    // the racing line, and `check_pits` allows six metres for that against a
+    // few centimetres of movement here.
+    {
+      const smooth1 = (arr, half) => arr.map((_, k) => {
+        let sum = 0, n2 = 0;
+        for (let d2 = -half; d2 <= half; d2++) {
+          const kk = k + d2;
+          if (kk < 0 || kk >= arr.length) continue;
+          sum += arr[kk]; n2++;
+        }
+        return sum / n2;
+      });
+      let v = pts.map((q) => q.n);
+      let w = pts.map((q) => q.half);
+      for (let q = 0; q < 4; q++) { v = smooth1(v, 4); w = smooth1(w, 4); }
+      const stw = {};
+      for (let k = 0; k < pts.length; k++) {
+        pts[k].n = v[k];
+        // The half-width feeds `limit`, so a jittery one is a jittery corridor
+        // and the car is clamped in and out of it every few metres.
+        pts[k].half = w[k];
+        track.sample(pts[k].lapU, stw);
+        track.position(stw, pts[k].n, p);
+        pts[k].x = p.x;
+        pts[k].z = p.z;
+      }
+    }
+
+    // Headings, smoothed *separately* from the positions.
+    //
+    // Where a car sits and which way it points are different requirements: the
+    // position has to stay on the asphalt, and the heading has to be smooth or
+    // the car visibly jolts. Filtering them together forces a compromise that
+    // fails both - a filter strong enough to settle the heading pulls the line
+    // off the road through the entry taper.
+    //
+    // So the line is left where it is and the tangent field is low-passed on
+    // its own and renormalised. The two disagree by a fraction of a degree,
+    // which on a 4.4 m car is invisible; a ten-degree step between stations is
+    // not, and that is what this removes.
+    const rawT = [];
     for (let k = 0; k < STATIONS; k++) {
       const a = pts[Math.max(0, k - 1)], b = pts[Math.min(STATIONS - 1, k + 1)];
       let tx = b.x - a.x, tz = b.z - a.z;
       const m = Math.hypot(tx, tz) || 1;
-      tx /= m; tz /= m;
+      rawT.push([tx / m, tz / m]);
+    }
+    let smT = rawT;
+    for (let q = 0; q < 4; q++) {
+      smT = smT.map((_, k) => {
+        let sx = 0, sz = 0;
+        for (let d2 = -4; d2 <= 4; d2++) {
+          const kk = k + d2;
+          if (kk < 0 || kk >= smT.length) continue;
+          sx += smT[kk][0]; sz += smT[kk][1];
+        }
+        const m2 = Math.hypot(sx, sz) || 1;
+        return [sx / m2, sz / m2];
+      });
+    }
+
+    for (let k = 0; k < STATIONS; k++) {
+      const tx = smT[k][0], tz = smT[k][1];
       // Outward, on the driver's right. With Y up, (t x o).y = tz*ox - tx*oz
       // must be negative for an anticlockwise lap - the same convention the
       // circuit uses, and getting it backwards sends the pit lane the wrong
