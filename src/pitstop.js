@@ -29,6 +29,10 @@ const BOX_REACH = 1.2;          // metres either side of the box centre
 const STOP_DECEL = 2.6;         // m/s^2 aimed at the mark - a firm, smooth stop
 const SETTLE = 0.35;            // seconds held still before the crew start
 const LANE_HOLD = 1.4;          // how hard a car in the pits holds its lane
+// Metres before the box at which the car peels out of the through-lane. Long
+// enough to cross the lane while still rolling - steering needs speed - and
+// short enough that it is not driving over anybody else's box to get there.
+const PEEL = 26;
 
 /** How long the crew take, per difficulty. Easy is fastest - see below. */
 export const SERVICE_TIME = { easy: 3.0, normal: 5.5, hard: 8.0 };
@@ -86,11 +90,27 @@ export class PitLane {
     // pit road crosses the start/finish.
     const dist = this.road.distAt(this.track.delta(this.road.entryS, car.s));
     const pst = this.road.sample(dist, {});
-    const want = this.nearestLane(pst, car);
+    const want = this.laneFor({ s: dist });
     car.useRoad(this.road, dist, want);
     car.pit = Pit.IN;
     car.pitTimer = 0;
     return true;
+  }
+
+  /**
+   * The through-lane: the outer side of the pit road, away from the boxes.
+   *
+   * Everything that is not stopping uses it - coming in, going out, and
+   * driving past a car being serviced. The boxes sit against the wall on the
+   * inboard side, so this is the side that stays clear.
+   */
+  laneFor(car) {
+    const st = this.road.sample(car.s, {});
+    const hi = this.road.limit(st, 1);
+    const lo = this.road.limit(st, -1);
+    // Half a car's width inside the outer edge, and never past the middle -
+    // on a narrow stretch the whole lane may be barely wider than one car.
+    return Math.max((lo + hi) / 2, hi - 1.3);
   }
 
   /** A legal lateral offset on the pit ribbon: the middle of its corridor. */
@@ -132,12 +152,21 @@ export class PitLane {
     car.pitTimer = (car.pitTimer || 0) + dt;
 
     if (car.pit === Pit.IN) {
-      // Aim at the box from the moment of entry, not once it is alongside.
-      // Lane changes need speed - `laneSteer` asks for a crossing *rate* - so a
-      // car that brakes first and moves over second never moves over at all:
-      // it stopped at n = +3.2 with its box at -3.4, could not steer at zero
-      // speed, and sat there for the rest of the race.
-      car.steer = laneSteer(car, box.n, dt, LANE_HOLD);
+      // Down the *lane*, not down the row of boxes.
+      //
+      // The boxes are against the wall, so aiming at one from the entry drives
+      // the whole length of the pits over every other car's box - which is
+      // where a rival being serviced is parked. Run the outer half of the lane
+      // instead and peel in only for the last few car lengths, which is what a
+      // pit lane is for and what everybody else is expecting.
+      //
+      // The turn-in still has to start early enough to be *possible*:
+      // `laneSteer` asks for a crossing rate, so a car that brakes to walking
+      // pace before moving over can never move over at all - it cannot steer
+      // at zero speed. `PEEL` is measured to leave room for both.
+      const lane = this.laneFor(car);
+      const peeling = car.s > box.d - PEEL;
+      car.steer = laneSteer(car, peeling ? box.n : lane, dt, LANE_HOLD);
 
       // Brake on the distance *remaining*, so the car arrives at rest on the
       // mark rather than stopping wherever it happens to be slow enough. A
@@ -186,8 +215,9 @@ export class PitLane {
       return true;
     }
 
-    // LEAVING: back out into the lane and away.
-    car.steer = laneSteer(car, 0, dt, LANE_HOLD);
+    // LEAVING: back out into the through-lane and away, so the run to the
+    // exit does not cross every box downstream of this one.
+    car.steer = laneSteer(car, this.laneFor(car), dt, LANE_HOLD);
     const target = this.road.speedLimit;
     car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.4, 0, 1);
     car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.2, 0, 1);

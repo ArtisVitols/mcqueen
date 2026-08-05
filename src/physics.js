@@ -269,169 +269,200 @@ const sport = {
 
 /* ----------------------------------------------------------------- pro -- */
 
-// Radians of front wheel angle at full lock. A fixed rack: there is no
-// speed-sensitive reduction and no traction limit anywhere in this model, by
-// design - both are driving aids, and Pro is the one without any.
-const P_STEER_LOCK = 0.50;
-const P_A = 1.46;                     // metres, centre of mass to the front axle
-const P_B = 1.24;                     // ... and to the rear
-const P_IZ = 1.60;                    // yaw inertia over mass, m^2
-// Static weight on each axle, which follows from where the mass sits: the
-// axle further from the centre of mass carries less. Not a free parameter.
-const P_FRONT_SHARE = P_B / (P_A + P_B);
-// Cornering stiffness per unit mass, m/s^2 per radian of slip. Sized so the
-// tyres saturate around a tenth of a radian, which is where real ones give up.
-const P_CS_FRONT = 180;
-const P_CS_REAR = 210;                // rear stiffer than front: stable at heart
-const P_YAW_MAX = 1.4;                // rad/s; past this the car is already lost
-// Self-aligning torque: the front wheels' castor pulls the car round to point
-// where it is actually travelling. Small in a normal corner, and the reason a
-// real car walks itself out of a slide instead of needing to be caught
-// perfectly - which is what makes this model driveable rather than a trap.
-const P_ALIGN = 9.0;
-const P_V_REF = 8;                    // slip angles are meaningless below this
-const P_RECOVER_PSI = 1.05;           // ~80 degrees, where the safety net starts
-const P_SCRUB_FLOOR = 10;             // m/s below which a spin stops costing speed
-
 /**
- * Yaw dynamics: the rear can step out, and you have to catch it.
+ * Pro: a grip-limited car with no aids whatsoever.
  *
- * `psi` stops being something the driver sets and becomes a state driven by
- * front and rear tyre forces. Power eats into the rear's lateral grip, so
- * getting on the throttle mid-corner swings the tail - and opposite lock is
- * the way out, because the front slip angle is what pulls it straight.
+ * Rewritten. The first version was a slip-angle bicycle model - front and rear
+ * cornering stiffnesses, a friction ellipse, self-aligning torque - and it was
+ * chaotic to drive. The reason is structural, not a matter of tuning: slip
+ * angle depends on lateral velocity, lateral velocity is driven by tyre force,
+ * and tyre force depends on slip angle. That is a second-order feedback loop
+ * with very little damping, so any input rings, and at racing speed the ringing
+ * saturates an axle and the car is gone. It is also singular at a standstill.
  *
- * Past `P_RECOVER_PSI` a straightening torque and a hard speed scrub take
- * over. A spin costs the race; it never ends with a car parked facing a wall,
- * which matters because the AI drives this model too and every car has to
- * finish.
+ * This one is built the other way round, and every quantity in it is bounded:
+ *
+ *   1. The rack is fixed-ratio and commands a **yaw rate**, kinematically -
+ *      `v * tan(delta) / wheelbase`. No feedback, no resonance, and zero at a
+ *      standstill because a stationary car does not rotate.
+ *   2. That yaw demands a lateral acceleration. The tyres supply what they
+ *      have and no more, so asking for too much simply turns the car less:
+ *      it **understeers and runs wide**, which is a thing you can feel and
+ *      back off from rather than a thing that spits you round.
+ *   3. Whatever the tyres could not supply becomes a **slide** - real lateral
+ *      velocity, which costs speed and has to be driven out.
+ *   4. Power beyond the rear tyres' share of the grip **rotates the car
+ *      further into the corner**. Get greedy mid-bend and the tail steps; lift
+ *      and it comes back. That is the oversteer, and it is proportional to how
+ *      greedy you were rather than to how long the loop has been ringing.
+ *
+ * Still no assists: no corner braking, no lane holding, no automatic overtake,
+ * no traction control, and no speed-sensitive rack quietly refusing to ask the
+ * tyres for more than they have. What changed is that the car is *predictable*
+ * when you overdrive it, not that it stopped being possible to overdrive.
+ *
+ * Written in track yaw, like everything else here - see CLAUDE.md. In world
+ * yaw a car with no steering input carries straight on while the road turns
+ * away, and nothing ever brings it back.
  */
+// Radians of front wheel angle at full lock.
+//
+// Sized for the *controls*, which are two buttons rather than a wheel. At
+// 70 m/s the tyres can sustain about 0.64 rad/s of yaw, which is a wheel
+// angle of a degree and a half - so a lock a driver could hold all day in a
+// real car is, through a button, an instant trip into the scenery. The ramp
+// below is what meters it: a dab gives a small angle, and holding it down at
+// speed washes the car wide, which is the model doing its job.
+const PRO_LOCK = 0.30;
+const PRO_WHEELBASE = 2.7;            // m
+const PRO_YAW_LAG = 8.0;              // 1/s the car's yaw follows the command
+const PRO_V_FLOOR = 6;                // m/s; below this grip cannot be exceeded
+const PRO_REAR_SHARE = 0.54;          // the rear's share of the grip budget
+const PRO_OVERSTEER = 1.3;            // how hard surplus power rotates the car
+const PRO_SLIDE_SCRUB = 0.05;         // per second, how fast a slide washes off
+const PRO_SCRUB = 0.8;               // speed lost per unit of grip asked for and missed
+const PRO_CORNER = 1.0;              // how far past the no-slide limit is still quick
+// Rad/s of turn asked for at full lock. The buttons command a *rate*, and the
+// rack follows from it - see the note in drive(). This is the steering ratio,
+// which with two buttons instead of a wheel the game has to choose.
+const PRO_YAW_CMD = 0.95;
+const PRO_RECOVER_PSI = 1.15;         // ~66 deg, where the safety net starts
+const PRO_SCRUB_FLOOR = 10;           // m/s below which a spin stops costing speed
+
 const pro = {
   id: 'pro',
   label: 'Pro',
-  blurb: 'No assists at all. You steer it or you spin it.',
-  maxPsi: 2.6,
-  // How fast the driver can wind the wheel over, not an assist: a real one
-  // takes about a quarter second to reach full lock, and buttons that snap
-  // from centre to full in a single frame are not a steering wheel.
+  blurb: 'No assists at all. Overdrive it and it washes wide.',
+  maxPsi: 1.5,
+  // How fast the driver can wind the wheel over. Not an assist: a real rack
+  // takes about a quarter second to full lock, and buttons that snap from
+  // centre to full in one frame are not a steering wheel.
   steerRamp: 4.5,
   wallScrub: 0.18,
-  // **Nothing drives this car but you.** No corner braking, no lane holding,
-  // no automatic overtake, and no speed-sensitive rack quietly refusing to
-  // ask the tyres for more than they have. The buttons move the front wheels
-  // and the tyres decide what happens next.
   assisted: false,
   geared: true,
   yawModel: true,               // psi is a state here, not a command
-  // The AI still needs a controller - it is a driver, not an assist - and
-  // these are its gains. A high-gain loop around a heading that has inertia
-  // behind it resonates into a spin, so it is gentle and well damped.
-  steerGain: 9.0,
-  yawDamp: 2.4,
-  laneClose: 0.40,
+  // The AI drives this too, and it is a driver rather than an aid. With a
+  // bounded, first-order yaw these can be firmer than the old model allowed.
+  // Gentle, because the rack is not. A yaw command is `v*tan(delta)/L`, so at
+  // racing speed a hair of lock is already the whole grip budget - a
+  // controller tuned like Sport's saws at the wheel, misses grip on every
+  // correction, and scrubs a second a lap away for nothing.
+  steerGain: 3.2,
+  yawDamp: 1.2,
+  laneClose: 0.5,
 
   drive(car, st, dt) {
     const v = Math.max(car.speed, 0.001);
-    // Slip angle is (lateral speed / forward speed), which is meaningless at a
-    // standstill: the bicycle model is singular at v = 0. Floor the reference
-    // speed and fade the tyres in, or the car sits on the grid sawing itself
-    // sideways with the friction circle leaving nothing to drive with.
-    const vRef = Math.max(car.speed, P_V_REF);
-    const fade = Math.min(1, car.speed / 6);
     const bank = car.road.slope(st, car.n);
     const grip = gripLimit(v, bank, tyreGrip(car));
-    // A fixed-ratio rack, like a real car. It used to be tied to the grip -
-    // never asking the tyres for more than they had - which is a driving aid
-    // however it is dressed up, and this model is meant not to have one.
-    //
-    // The consequence is real and intended: full lock at 250 km/h asks for
-    // several times the grip available, the front washes out or the rear
-    // steps round, and it is the driver's job not to do that. Steering is
-    // something you meter here.
-    const delta = car.steer * P_STEER_LOCK;
-    car.steerAngle = delta;
 
-    // Everything here is outward-positive and *relative to the track*, not to
-    // the world. That is the whole difference between a model that can be
-    // driven and one that cannot: written in world yaw, a car with no steering
-    // input carries straight on while the road turns away, so the slip angles
-    // run away, both axles saturate - at which point the restoring moment is
-    // zero, because a balanced car has a*Wf = b*Wr - and it spins on the spot
-    // for the rest of the lap. In track yaw a car left alone simply follows
-    // the road, exactly as it does under Arcade, and the tyre forces are what
-    // let it deviate: turn in, run wide, or step the rear out under power.
-    const r = car.yawRate || 0;
-    const slipF = delta - (car.vy + P_A * r) / vRef;
-    const slipR = -(car.vy - P_B * r) / vRef;
-
-    // Each axle only has the grip its share of the weight gives it, and only
-    // what the friction ellipse leaves after the longitudinal load. Scaling
-    // the rear budget by the *throttle pedal* instead - as this did - made the
-    // car permanently oversteer at 250 km/h, where the engine can barely push
-    // at all, and that is what made Pro chaotic to drive.
-    const rearMax = grip * (1 - P_FRONT_SHARE);
-    const frontMax = grip * P_FRONT_SHARE;
-
-    // Longitudinal force, because what it leaves behind is what the tyres have
-    // to steer with. Rear-wheel drive, and braking split front-biased.
-    //
-    // No traction control. What the engine asks for is what the rear tyres
-    // have to find, and if that is more than they have, the friction ellipse
-    // below leaves them nothing to steer with and the tail comes round. That
-    // is the model working, not a bug - a rear-drive car with this much power
-    // and a throttle that is either off or wide open behaves exactly so.
+    // Longitudinal first, because what it uses is not available to turn with.
     const wantDrive = Math.min(car.throttle * S_ENGINE * gearbox(car, dt), S_POWER / v);
     const wantStop = car.brake * S_BRAKE;
-    const rearLong = wantDrive + wantStop * 0.4;
-    const frontLong = wantStop * 0.6;
-    const rearBudget = Math.sqrt(Math.max(0, rearMax * rearMax - rearLong * rearLong));
-    const frontBudget = Math.sqrt(Math.max(0, frontMax * frontMax - frontLong * frontLong));
+    const longUsed = wantDrive + wantStop;
+    const latMax = Math.sqrt(Math.max(0, grip * grip - longUsed * longUsed));
 
-    const fF = clamp(P_CS_FRONT * slipF, -frontBudget, frontBudget) * fade;
-    const fR = clamp(P_CS_REAR * slipR, -rearBudget, rearBudget) * fade;
+    // The buttons command a **rate of turn**, and the rack follows from it.
+    //
+    // This is the steering *ratio*, not an aid. A driver with a wheel turns it
+    // less at speed without thinking about it; with two buttons the game has
+    // to make that choice, and a fixed lock makes the control unusable - 0.30
+    // rad at 60 m/s asks for 4 rad/s of yaw when the tyres can hold 0.6, so a
+    // single tap wiped the car's speed out and the AI could not steer without
+    // scrubbing a second a lap away.
+    //
+    // Nothing here limits the car to what the tyres have: at racing speed full
+    // lock still asks for more grip than exists, still understeers, and still
+    // lets the tail go. What it buys is that the first few degrees mean
+    // something, which is what makes it driveable rather than a trap.
+    const yawWant = car.steer * PRO_YAW_CMD;
+    // ... and the front wheels sit wherever that rate puts them, for the
+    // visuals and for anything else reading `steerAngle`.
+    const delta = clamp(Math.atan(yawWant * PRO_WHEELBASE / Math.max(v, 3)),
+                        -PRO_LOCK, PRO_LOCK);
+    car.steerAngle = delta;
 
-    // The corner still has to be paid for: this is the same outward demand
-    // Sport uses, less whatever the car unwinds by rotating out of the turn.
-    // Exceed what the tyres can hold and the difference becomes a slide.
-    car.vy += (fF + fR + v * v * st.kappa - v * r) * dt;
-    const align = P_ALIGN * Math.atan2(car.vy, v);
-    car.yawRate = clamp((r + ((P_A * fF - P_B * fR) / P_IZ + align) * dt) * Math.pow(0.25, dt),
-                        -P_YAW_MAX, P_YAW_MAX);
+    // The lateral acceleration that would take, outward-positive. Following
+    // the road at all is worth `-v*v*kappa` of it: in track space holding a
+    // line is otherwise free, and a corner has to cost something.
+    const need = v * yawWant - v * v * st.kappa;
+    const have = clamp(need, -latMax, latMax);
+
+    // Understeer falls straight out of that clamp: the yaw the car actually
+    // gets is whatever the tyres could pay for.
+    let yawTarget = have / Math.max(v, PRO_V_FLOOR) + v * st.kappa;
+
+    // Power oversteer. Anything the engine asks for beyond the rear's share
+    // of the grip rotates the car further the way it is already going. No
+    // traction control: this is the whole point of the model.
+    const spare = grip * PRO_REAR_SHARE - wantDrive;
+    if (spare < 0) {
+      const way = Math.sign(yawTarget) || Math.sign(yawWant) || Math.sign(car.psi) || 1;
+      yawTarget += way * (-spare) * PRO_OVERSTEER / Math.max(v, 12);
+    }
+
+    // The car has mass, so yaw follows its command rather than snapping to it.
+    car.yawRate = ((car.yawRate || 0)
+                   + (yawTarget - (car.yawRate || 0)) * Math.min(1, dt * PRO_YAW_LAG));
     car.psi += car.yawRate * dt;
+
+    // Understeer is already in `psi` and must not be added to `vy` as well.
+    //
+    // The yaw above follows what the tyres could actually pay for, so a car
+    // asked for more than they have simply does not rotate enough and its
+    // heading drifts outward - which *is* running wide, and `Car.step` turns
+    // it into lateral movement through sin(psi). Adding the shortfall to `vy`
+    // on top double-counts it, and with the opposite sign: the missing force
+    // is an *inward* one, so it pushed a car that could not make the corner
+    // towards the infield.
+    car.vy *= Math.pow(PRO_SLIDE_SCRUB, dt);
 
     // The safety net. Not decoration: without it a spun car sits there and the
     // race never finishes - and the AI drives this model too.
-    if (Math.abs(car.psi) > P_RECOVER_PSI) {
-      const over = Math.abs(car.psi) - P_RECOVER_PSI;
-      // A floor under the unwinding rate, and no scrubbing once the car is
-      // slow. Proportional-only recovery stalls at the threshold, and below
-      // walking pace the tyres have faded out and cannot straighten the car
-      // themselves - so a spun car sat there losing the last of its speed
-      // forever, and three of them failed to finish a race.
+    if (Math.abs(car.psi) > PRO_RECOVER_PSI) {
+      const over = Math.abs(car.psi) - PRO_RECOVER_PSI;
       car.psi -= Math.sign(car.psi) * Math.min(Math.abs(car.psi), (over * 3.5 + 0.9) * dt);
       car.yawRate *= Math.pow(0.02, dt);
       car.vy *= Math.pow(0.05, dt);
-      if (car.speed > P_SCRUB_FLOOR) car.speed *= Math.pow(0.25, dt);
+      if (car.speed > PRO_SCRUB_FLOOR) car.speed *= Math.pow(0.25, dt);
     }
 
-    const used = Math.min(grip, Math.abs(fF + fR));
-    car.slip = Math.min(1, Math.abs(car.vy) / 4 + Math.abs(slipR) * 3);
+    // How much lateral grip was asked for and not found. This is the whole
+    // cost of overdriving: it scrubs speed, it squeals, and it is what makes
+    // braking properly faster than not.
+    const miss = Math.abs(need - have);
+    car.slip = Math.min(1, miss / 10 + Math.abs(car.vy) / 4);
 
-    const longMax = Math.sqrt(Math.max(0, grip * grip - used * used));
+    const longMax = Math.sqrt(Math.max(0, grip * grip - have * have));
     const drive = Math.min(wantDrive, longMax);
     const stop = Math.min(wantStop, longMax);
     const drag = S_DRAG * v * v * (1 - 0.22 * (car.draft || 0)) + S_ROLL_DRAG;
-    const slideDrag = used * Math.abs(car.vy) / v;
+    // A tyre that is not gripping is scrubbing, and that costs speed. Without
+    // it a throttle-pinned car simply understeers round every corner for free
+    // and beats a driver who brakes for them, which is the wrong way round.
+    //
+    // Squared, and relative to the grip available, so the shape is right: a
+    // *little* understeer is quick - which is why the AI is allowed to run
+    // just past the no-slide limit - and arriving far too fast is ruinous.
+    // Charging it linearly made both true at once, so barrelling in cost
+    // about what braking did and there was no reason to brake.
+    const slideDrag = PRO_SCRUB * miss * miss / Math.max(4, grip);
 
     car.speed = Math.max(0, car.speed + (drive - stop - drag - slideDrag) * dt);
   },
 
   cornerSpeed(car, st, n) {
-    // No extra margin: this used to hold rivals back because a Pro-model AI
-    // that ran near the limit spun itself out of the race, and with the
-    // self-aligning torque in place it no longer does. Difficulty sets the
-    // margin now, through `aiCorner`.
-    return cornerSpeedAt(car, st, n);
+    // A margin *above* the no-slide limit, unlike every other model here.
+    //
+    // `cornerSpeedAt` is the speed at which the tyres exactly balance the
+    // corner with nothing to spare. This model lets a car carry more than that
+    // and pay for it in scrub - which is real, and quick: a little understeer
+    // is faster than lifting to the point where there is none. An AI held to
+    // the pure limit was ten metres a second slower through every bend than a
+    // car simply left at full throttle, which is the wrong way round and made
+    // the whole model look broken.
+    return cornerSpeedAt(car, st, n) * PRO_CORNER;
   },
 };
 

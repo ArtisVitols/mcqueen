@@ -74,7 +74,7 @@ on track drives whichever you choose.
 |---|---|
 | **Arcade** | The default. Hold the gas and the car follows the track; cornering costs nothing and you cannot spin. Built for a five-year-old. |
 | **Sport** | Real grip. Carry too much speed in and the car washes wide with the tyres howling; the high line grips, the low line is shorter. Still cannot spin. |
-| **Pro** | **No assists at all.** Nothing brakes for the corner, nothing holds your lane, and the steering rack is fixed - full lock at 250 km/h asks for far more grip than the tyres have, and the car will let you. You have to drive it. |
+| **Pro** | **No assists at all.** Nothing brakes for the corner, nothing holds your lane, nothing meters the throttle. Overdrive a bend and the car washes wide and scrubs speed off; get greedy on the power and the tail steps out. Predictable, and unforgiving of being clumsy. |
 
 Sport and Pro add a six-speed gearbox, so the engine steps through the ratios
 and the gear shows under the speed.

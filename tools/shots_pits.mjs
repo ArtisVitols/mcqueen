@@ -95,6 +95,12 @@ const advance = (seconds) => page.evaluate((s) => {
     // simulation is stepped by hand - so drive them here too, or Guido never
     // leaves his spot and the screenshots show an empty pit box.
     g.updatePits(g.race, g.race.player, 1 / 60);
+    // Trail of where Guido has really been, so the check below tests the
+    // route he drove rather than the one that was planned for him.
+    if (g.crew && g.crew.guido && g.crew.guido.visible) {
+      (window.__guidoTrack ||= []).push([g.crew.guido.position.x,
+        g.crew.guido.position.y, g.crew.guido.position.z]);
+    }
   }
   const p = g.race.player;
   return { lap: p.lap, tyre: +p.tyre.toFixed(3), pit: p.pit, onPit: p.onPit,
@@ -164,15 +170,19 @@ if (!caught) {
     const car = g.race.player;
     const size = g.models.get(car.spec.id).size;
     const halfW = size.x / 2, halfL = size.z / 2;
+    const rad = c.radius;
     const fwd = new (Object.getPrototypeOf(car.position).constructor)(0, 0, 1);
     fwd.applyQuaternion(car.model.quaternion); fwd.y = 0; fwd.normalize();
     const right = new (Object.getPrototypeOf(car.position).constructor)();
     right.crossVectors(fwd, new (Object.getPrototypeOf(car.position).constructor)(0, 1, 0));
     right.normalize();
-    // The whole planned round: out from his spot, every waypoint in order,
-    // and back. Starting from wherever he has got to would trace a line
-    // back through waypoints he has already left behind him.
-    const pts = [c.home.clone(), ...c.route.map((p2) => p2.clone()), c.home.clone()];
+    // Where he has *actually been*, sampled every frame by `track()` below,
+    // not the plan. The plan being clean is necessary and not sufficient:
+    // a stop that begins while he is still walking home from the last one
+    // starts him somewhere the plan never accounted for.
+    const pts = (window.__guidoTrack || []).map((q) =>
+      new (Object.getPrototypeOf(car.position).constructor)(q[0], q[1], q[2]));
+    if (pts.length < 2) return { inside: -1, worst: 0, legs: 0 };
     let worst = Infinity;
     let inside = 0;
     for (let i = 1; i < pts.length; i++) {
@@ -182,17 +192,22 @@ if (!caught) {
         const u = Math.abs(p2.dot(right)) / halfW;
         const v = Math.abs(p2.dot(fwd)) / halfL;
         // How far outside the bodywork, as a fraction: <1 on both means inside.
+        // Measured against *his* footprint, not his centre. Treating him as a
+        // point is why this passed while he was visibly clipping the car:
+        // his centre stayed outside the bodywork and his nose did not.
         const clear = Math.max(u, v);
         worst = Math.min(worst, clear);
-        if (u < 1 && v < 1) inside++;
+        if (u < 1 + rad / halfW && v < 1 + rad / halfL) inside++;
       }
     }
     return { inside, worst: +worst.toFixed(3), legs: pts.length - 1 };
   });
-  clash.inside === 0
+  clash.inside === 0 && clash.legs > 0
     ? ok(`his route goes round the car (${clash.legs} legs, closest approach ` +
          `${clash.worst.toFixed(2)} of a half-body)`)
-    : fail(`Guido drives through the car: ${clash.inside} sampled points inside it`);
+    : fail(clash.inside < 0 ? 'no track recorded for Guido'
+        : `Guido drives through the car: ${clash.inside} of ${clash.legs} ` +
+          'sampled positions were inside the bodywork');
 
   // A few frames through the service, so his route round it is visible.
   for (let k = 0; k < 3; k++) {

@@ -32,9 +32,16 @@ export class PitCrew {
    * @param {THREE.Object3D} guido  the loaded Guido pivot
    * @param {THREE.Object3D} mack   the loaded Mack pivot, or null
    */
-  constructor(guido, mack) {
+  constructor(guido, mack, guidoSize = null) {
     this.guido = guido;
     this.mack = mack;
+    // His own footprint, as a radius. The ring below has to clear the car by
+    // this much *plus* the standoff, because Guido is a vehicle and not a
+    // point - his centre staying outside the bodywork still swings his nose
+    // through it at every corner of the route, which is exactly what it
+    // looked like.
+    this.radius = guidoSize
+      ? Math.hypot(guidoSize.x, guidoSize.z) / 2 : 0.8;
     this.active = false;
     this.at = 0;                // which waypoint he is on
     this.wait = 0;
@@ -89,8 +96,9 @@ export class PitCrew {
 
     // Clear of the *bodywork*, not of the wheels: the wheels sit inside the
     // nose and tail, so standing off from them would put him in the bumper.
-    const halfW = (size ? size.x : 1.9) / 2 + STANDOFF;
-    const halfL = (size ? size.z : 4.4) / 2 + STANDOFF;
+    const clear = STANDOFF + this.radius;
+    const halfW = (size ? size.x : 1.9) / 2 + clear;
+    const halfL = (size ? size.z : 4.4) / 2 + clear;
 
     // Everything below happens on a **rectangle around the car** - the ring.
     // Every waypoint sits on its perimeter and every move follows that

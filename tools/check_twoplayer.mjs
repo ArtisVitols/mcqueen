@@ -80,8 +80,14 @@ await guest.click('#btn-join');
 await guest.evaluate((c) => { document.getElementById('join-code').value = c; }, code);
 await guest.click('#btn-connect');
 
-await host.waitForFunction("window.game.race", { timeout: 240000, polling: 300 });
-await guest.waitForFunction("window.game.race", { timeout: 240000, polling: 300 });
+// Wait for the race to be *seated*, not merely to exist. `window.game.race`
+// is set the moment the grid is built, and on the host the second human is
+// added when the start message is acknowledged - a hair later. Reading between
+// the two saw one human on one tab and two on the other, which looks exactly
+// like the grid bug this file exists to catch.
+const seated = "window.game.race && window.game.race.humans.length === 2";
+await host.waitForFunction(seated, { timeout: 240000, polling: 300 });
+await guest.waitForFunction(seated, { timeout: 240000, polling: 300 });
 ok('both tabs built a race');
 
 const grids = await Promise.all([host, guest].map((p) => p.evaluate(() => ({

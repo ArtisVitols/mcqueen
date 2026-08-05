@@ -90,6 +90,36 @@ Consequences to respect:
 the default), **Sport** (real grip limits, still cannot spin) and **Pro** (yaw
 dynamics, no assists of any kind). Rivals drive whichever is selected.
 
+**Pro was rewritten once, and the reason is worth keeping.** The first version
+was a slip-angle bicycle model - cornering stiffnesses, a friction ellipse,
+self-aligning torque. It was chaotic to drive, and structurally so: slip angle
+depends on lateral velocity, lateral velocity on tyre force, tyre force on slip
+angle. That is a lightly damped second-order loop, so every input rings and at
+speed the ringing saturates an axle. It is also singular at a standstill.
+
+The model now runs the other way round and every quantity in it is bounded:
+the buttons command a **yaw rate**, kinematically; the tyres pay for it if they
+can, and if they cannot the car simply turns less - it **understeers and runs
+wide**, which is a thing you can feel; the grip they could not find is charged
+as scrub, squared, so a little understeer is quick and arriving far too fast is
+ruinous; and power beyond the rear's share rotates the car further into the
+corner. `check_steering` is the test that matters: full lock for 1.2 s at
+250 km/h now settles back to about 0 degrees instead of spinning.
+
+- **The rack commands a rate, not an angle, and that is a steering *ratio*
+  rather than an aid.** A driver with a wheel turns it less at speed without
+  thinking; with two buttons the game has to make that choice. A fixed 0.30 rad
+  lock asks for 4 rad/s of yaw at 60 m/s when the tyres hold 0.6, so one tap
+  wiped the car's speed out and the AI could not steer without scrubbing a
+  second a lap away. Nothing in it limits the car to what the tyres have.
+- **Retune the AI's gains when the rack changes.** `steerGain` went from 9 to
+  3.2 for exactly this reason - the controller output is a *rate* now, and the
+  old gain saturated it at full lock 60% of the time.
+- **Known, and not yet solved: Pro's AI is slower than Sport's** - about 127 s
+  against 111 s over three laps at Motor Speedway - so a throttle-pinned car
+  beats it. The model is stable and driveable, which is what it was rewritten
+  for; the pace is a separate tuning job.
+
 **Pro has `assisted: false`, and that is load-bearing.** No corner braking, no
 lane holding, no automatic overtake, a fixed-ratio steering rack and no
 traction control - the buttons move the front wheels and the tyres decide the
@@ -426,6 +456,19 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   where a pitting car is: `s` on the pit ribbon is a distance down a different
   coordinate system, so easing towards it with `track.delta` would interpolate
   between two of them.
+- **The pit lane has a through-lane, and it is not the row of boxes.** The
+  boxes are against the wall, so aiming at one from the entry drives the whole
+  length of the pits over every other car's box - which is where a rival being
+  serviced is parked. Cars run the outer side and peel in over the last 26 m;
+  `PEEL` is that distance, and it has to be long enough to cross the lane
+  while still rolling, because `laneSteer` asks for a crossing *rate* and a
+  stopped car cannot steer.
+- **Guido is a vehicle, not a point.** Clearing the bodywork by his standoff
+  keeps his *centre* outside the car and swings his nose straight through it
+  at every corner of the route - which is what it looked like, and why a
+  clearance test written against his centre passed while he was visibly
+  clipping. The ring is offset by the standoff **plus his own radius**, and
+  the test measures against his footprint.
 - **Guido drives round a ring, not from wheel to wheel.** Straight lines
   between corners go through the car. The route is built on a rectangle
   enclosing the bodywork: every waypoint sits on its perimeter, every move

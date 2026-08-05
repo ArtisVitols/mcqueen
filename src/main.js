@@ -975,7 +975,7 @@ class Game {
     const side = this._w.set(st.ox, 0, st.oz).multiplyScalar(Math.sign(mine.n) || -1);
     const guido = this.models.get('guido');
     const mack = this.models.get('mack');
-    this.crew = new PitCrew(guido?.object || null, mack?.object || null);
+    this.crew = new PitCrew(guido?.object || null, mack?.object || null, guido?.size || null);
     this.crew.place(p, side, Math.atan2(st.tx, st.tz));
   }
 
