@@ -228,13 +228,39 @@ for (const spec of todo) {
     return Math.atan2(st.tz, st.tx) + c.psi;
   };
   let worstJump = 0, worstTurn = 0;
+  // **Nothing in the pit lane may move further than it could have driven.**
+  //
+  // The handover is not the only way a car can teleport, and it turned out not
+  // to be the worst one: contact resolved the whole overlap *per step* rather
+  // than per second, so with eighteen cars in a lane a couple of metres wide it
+  // threw cars four and five metres sideways in a single frame and then threw
+  // them back. Thousands of steps a race, and it read exactly like the exit
+  // snapping the car onto the racing line.
+  let worstStep = 0, badSteps = 0, worstIn = 0;
+  const wasAt = new Map(), wasSpeed = new Map();
   while (race.state !== State.FINISHED && t < 1500) {
     for (const c of race.field) {
       wasRoad.set(c, c.road); wasPos.set(c, c.position.clone()); wasHead.set(c, heading(c));
+      wasAt.set(c, c.position.clone()); wasSpeed.set(c, c.speed);
     }
     race.update(DT, AIM_LEFT);
     t += DT;
     for (const c of race.field) {
+      // Every car that is in the pits, or has just left them.
+      if (c.onPit || wasRoad.get(c) !== c.road) {
+        const moved = c.position.distanceTo(wasAt.get(c));
+        const could = Math.max(0.05, wasSpeed.get(c) * DT * 1.6) + 0.15;
+        // Turning *in* is measured apart from everything else. The entry taper
+        // is a metre and a bit wide at Yoyleland - narrower than the gap
+        // between the two roads there - so a car diving in at 240 km/h is
+        // clamped into it and that is geometry, not a bug. Coming *out* is
+        // what the owner reported and what had to be fixed.
+        const turningIn = wasRoad.get(c) !== c.road && c.onPit;
+        if (moved > could) {
+          if (turningIn) worstIn = Math.max(worstIn, moved);
+          else { badSteps++; worstStep = Math.max(worstStep, moved); }
+        }
+      }
       if (wasRoad.get(c) === c.road) continue;
       worstJump = Math.max(worstJump, c.position.distanceTo(wasPos.get(c)));
       let turn = heading(c) - wasHead.get(c);
@@ -322,6 +348,11 @@ for (const spec of todo) {
   progressJump === 0
     ? ok('progress never jumped at a handover - the pit lane is not a shortcut')
     : fail(`progress jumped ${progressJump.toFixed(1)} m changing ribbon`);
+  worstStep < 1.0 && worstIn < 1.7
+    ? ok(`nothing was moved further than it could drive (worst ${worstStep.toFixed(2)} m ` +
+         `in the lane, ${worstIn.toFixed(2)} m turning in, ${badSteps} step(s))`)
+    : fail(`a car was moved ${Math.max(worstStep, worstIn).toFixed(1)} m in one step, ` +
+           `${badSteps} times`);
   worstJump < 3 && worstTurn < 0.35
     ? ok(`the handovers are smooth (worst ${worstJump.toFixed(2)} m, ` +
          `${(worstTurn * 180 / Math.PI).toFixed(1)} deg)`)

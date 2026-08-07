@@ -546,6 +546,22 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
     21 degrees in one station at the pit exit - and buys nothing, because the
     end only has to overlap the racing line and `check_pits` allows six metres
     for that.
+- **Leaving is *driving* out, which means aiming at a lane that lands on the
+  road.** The ribbon does not end on the racing line, it ends near it: Motor
+  Speedway's last station projects to lap n = -4.60 against a corridor edge at
+  -4.89, so a car anywhere on the pit-wall side of the lane has nowhere legal
+  to be handed over to and gets *put* on the road rather than driving onto it.
+  The run out therefore aims at `exitN` - measured once from the geometry, the
+  offset whose projection sits `EXIT_MARGIN` inside the corridor - and holds it
+  firmly, because whatever lateral error is left when the ribbon runs out is
+  exactly the size of the jump. That took the exit from 2.1 m on a third of all
+  stops to 0.03 m on most and 0.8 m at worst.
+- **Turning *in* is a different problem and is not solved.** Yoyleland's entry
+  taper is 1.2 m wide and the two roads are further apart than that where they
+  meet, so a car diving in at 240 km/h is clamped into the ribbon and moves
+  about 1.5 m doing it. That is the data, not the handover; `check_pits`
+  measures it separately from everything else so the two cannot hide each
+  other.
 - **Stop by braking on the distance remaining**, `sqrt(2·a·left)`, so the car
   arrives at rest on the mark. "Close enough, then brake" left it up to 3.5 m
   short of a painted rectangle you can see; the curve puts it within 4 cm.
@@ -864,9 +880,18 @@ entry is correct; a car floating over the gap is not.
 - **`refine_track.mjs` is not idempotent.** It reads the file it writes, so
   running it twice compounds the width trimming. Always run `extract_oval.py`
   first.
-- **Contact between cars is charged per second, not per step.** `separate()`
-  runs at 120 Hz; unscaled, its speed penalty took 14 m/s off a car in half a
-  second of light touching, so brushing a rival read as a crash.
+- **Contact between cars is charged per second, not per step - and that goes
+  for the *shove* as well as the speed penalty.** `separate()` runs at 120 Hz;
+  unscaled, its speed penalty took 14 m/s off a car in half a second of light
+  touching, so brushing a rival read as a crash. The lateral correction had
+  never had the same treatment: resolving the whole overlap every step is a
+  sideways velocity of hundreds of metres a second, and a car between two
+  others gets it twice. On the circuit it was invisible; in a pit lane with
+  eighteen cars in a corridor a couple of metres wide it threw them four and
+  five metres sideways in a single frame and then threw them back, thousands
+  of steps a race. It reads exactly like the exit snapping the car onto the
+  racing line, which is how it was reported. `SEPARATE_RATE` is metres per
+  second.
 - **The grid is laid out in track space**, so it lands wherever the racing
   line's lateral offsets put it. Motor Speedway's start straight is the pit
   straight: the racing surface there runs roughly `n = -6.8 .. +0.8`, with the
@@ -1046,7 +1071,11 @@ What "good" looks like right now:
   everybody who did it properly. It also asserts the two things a stop must
   never disturb: that no handover moves a car more than a car's length or
   turns it more than 20 degrees, and that every car's `progress` stays within
-  a metre of where it actually is on the road.
+  a metre of where it actually is on the road. And the invariant that catches
+  the rest: **no car in the pit lane may move further in one step than it
+  could have driven.** That is what found the contact shove, which no
+  handover check could have - it happens between handovers, in the middle of
+  the lane, and it was thousands of times worse than the thing being watched.
 - `check_crashes.mjs` — runs at fifty times the shipped incident rate so every
   race has one, then checks the things a wreck must never do: leave a car
   outside the corridor, get shoved back onto the racing line, start on top of

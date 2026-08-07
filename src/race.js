@@ -65,6 +65,9 @@ const CRASH_CLEAR = 45;      // metres of lap either side of a human
 const CRASH_COAST = 0.7;     // seconds off the throttle before the brakes
 const CRASH_CLOSE = 3.4;     // m/s it is allowed to cross the road at
 const CRASH_STOPPED = 1.2;   // m/s that counts as parked
+// How fast contact may push two cars apart, in metres per second. Firm enough
+// to keep a pack from overlapping and slow enough to look like a push.
+const SEPARATE_RATE = 6;
 
 export const State = {
   COUNTDOWN: 'countdown',
@@ -638,7 +641,15 @@ export class Race {
         // One of them may be immovable, and then the other one does all the
         // moving - the same total separation, out of one car instead of two.
         const share = fixed(a) || fixed(b) ? 1 : 0.5;
-        const want = overlap * share;
+        // **Per second, not per step.** This is the same lesson the speed
+        // penalty below already learned, and the lateral shove had never had
+        // it: pushing cars apart by the whole overlap every step is a lateral
+        // velocity of hundreds of metres a second, and with a car between two
+        // others it happens twice. In a full pit lane - eighteen cars, boxes
+        // 15 m apart, a corridor a couple of metres wide - it threw cars four
+        // and five metres sideways in a single frame and then threw them back,
+        // which is not contact, it is a teleport with a pattern.
+        const want = Math.min(overlap * share, SEPARATE_RATE * dt);
         if (!fixed(a)) { a.n -= dir * Math.min(want, this.room(a, -dir)); this.clampLateral(a); }
         if (!fixed(b)) { b.n += dir * Math.min(want, this.room(b, dir)); this.clampLateral(b); }
 

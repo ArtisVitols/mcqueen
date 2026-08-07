@@ -117,14 +117,25 @@ export class Track {
       if (q < best) { best = q; bi = i; }
     }
     if (bi < 0) return null;
-    // The stations are a metre or two apart, so the foot of the perpendicular
-    // is within half a step of the nearest one and this one linear step lands
-    // on it.
-    const dx = x - d.x[bi], dz = z - d.z[bi];
-    return {
-      s: this.wrap(bi * this.step + dx * d.tx[bi] + dz * d.tz[bi]),
-      n: dx * d.ox[bi] + dz * d.oz[bi],
-    };
+    // Then walk it in. One linear step off the nearest station is close but not
+    // close enough: a point five metres off the centreline sits on a path with
+    // its own arc length, and reading its offset in a station's frame and then
+    // *rebuilding* it in the frame half a metre further on left the pit exit
+    // 0.75 m along the road from where the car actually was - a visible jump,
+    // and one that had nothing to do with the lateral placement everything
+    // else about the handover was busy getting right. Three iterations of the
+    // same step converge to millimetres.
+    let s = bi * this.step;
+    let n = 0;
+    for (let k = 0; k < 3; k++) {
+      const st = this.sample(s, _proj);
+      const dx = x - st.x, dz = z - st.z;
+      n = dx * st.ox + dz * st.oz;
+      const along = dx * st.tx + dz * st.tz;
+      if (Math.abs(along) < 1e-4) break;
+      s = this.wrap(s + along);
+    }
+    return { s, n };
   }
 
   sample(s, out = {}) {
@@ -252,6 +263,8 @@ export class Track {
 }
 
 const _m = new THREE.Matrix4();
+// Scratch for project(), which must not borrow a caller's station object.
+const _proj = {};
 
 // Half the widest car, plus a little clearance.
 const EDGE_MARGIN = 1.6;
