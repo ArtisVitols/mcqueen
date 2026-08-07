@@ -11,13 +11,19 @@
  *   node tools/check_twoplayer.mjs
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from './node/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// How many cars are on the grid. Read from the data rather than written
+// here: the field grew from seven to eighteen in one commit, and a test
+// that hardcodes the number fails for a reason that has nothing to do
+// with what it is checking.
+const FIELD = JSON.parse(readFileSync(join(ROOT, 'assets/cars.json'), 'utf8'))
+  .cars.filter((c) => c.racer !== false).length;
 const OUT = join(homedir(), 'mcqueen-shots');
 const CHROME = join(homedir(), '.local/chrome/chrome-headless-shell-linux64/chrome-headless-shell');
 const PORT = 8301;
@@ -149,13 +155,13 @@ await guest.screenshot({ path: join(OUT, 'two_guest.png') });
 
 // The guest leaving must not strand the host.
 await guest.close();
-await sleep(12000);   // longer than DROP_AFTER, at SwiftShader's frame rate
+await sleep(30000);   // comfortably longer than DROP_AFTER, which is 12 s
 const after = await host.evaluate(() => ({
   humans: window.game.race.humans.length,
   drivers: window.game.race.drivers.length,
   state: window.game.race.state,
 }));
-after.drivers === 6 && after.humans === 1
+after.drivers === FIELD - 1 && after.humans === 1
   ? ok('the guest leaving handed their car to the AI')
   : fail(`after the guest left: ${JSON.stringify(after)}`);
 

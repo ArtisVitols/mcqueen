@@ -63,6 +63,11 @@ export const DIFFICULTY = {
     // base the player is limited to, and 1.10 lands about 20 km/h above what
     // they actually reach on track once drag is paid - enough to hunt a leader
     // down without being able to drive away from them.
+    // Both of these are worth more than they look: capping `chaseCorner` at
+    // 1.02 - on the theory that above 1.0 it is asking for a slide rather than
+    // pace - was tried and made Hard *weaker*, taking back 11 places over a
+    // set of races instead of 17. A controlled slide out of a corner is how
+    // this model finds the extra, so leave it above one.
     chaseSpeed: 1.10, chaseCorner: 1.10,
   },
 };

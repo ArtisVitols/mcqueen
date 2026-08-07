@@ -17,7 +17,15 @@ const dom = (id) => document.getElementById(id);
 
 // Seconds of silence before the other phone counts as gone. Long enough to
 // ride out a lift tunnel, short enough that nobody races a ghost.
-const DROP_AFTER = 5;
+//
+// Raised from 5 when the grid went to eighteen cars. Five seconds is fine as
+// "this phone has gone" and much too tight as "this phone is having a hard
+// time": a device struggling with a full field goes quiet in bursts, and two
+// tabs under a software renderer dropped each other mid-race with neither of
+// them having gone anywhere. The heartbeat is on a wall clock now (see
+// `startPump`) rather than the frame rate, which is the real fix; this is the
+// margin that makes it forgiving.
+const DROP_AFTER = 12;
 
 class Game {
   constructor() {
@@ -564,12 +572,14 @@ class Game {
     if (!this.net || this.net.role !== 'host') return;
     const car = this.race?.humans.find((c) => c.spec.id === this.net.start?.guestCar);
     this.race?.abandon(car);
+    this.stopPump();
     this.net.link?.close?.();
     this.net = null;                  // the rest of the race is single-player
   }
 
   hostLeft() {
     if (!this.net || this.net.role !== 'guest') return;
+    this.stopPump();
     this.net = null;
     this.toMenu();
     dom('menu-track').textContent = 'The other player left the race';
@@ -753,9 +763,49 @@ class Game {
     this.loop(this._last);
   }
 
+  /**
+   * Keep the two phones talking on a **wall clock**, not on frames.
+   *
+   * Both ends decide the other has gone by hearing nothing for `DROP_AFTER`
+   * seconds, and that is the right test - a closed tab fires no event and a
+   * sleeping phone fires one far too late. But it only works if a device that
+   * is merely *slow* still says something. Sending from the render loop ties
+   * the heartbeat to the frame rate, so a phone struggling with a full grid
+   * looks exactly like a phone that has been switched off: with eighteen cars
+   * on screen, two tabs under a software renderer each dropped the other
+   * mid-race, and neither of them had gone anywhere.
+   *
+   * The interval keeps running when frames do not, so being slow now costs
+   * smoothness and nothing else.
+   */
+  startPump() {
+    this.stopPump();
+    const net = this.net;
+    if (!net) return;
+    const hz = net.role === 'host' ? SNAPSHOT_HZ : INPUT_HZ;
+    net.pump = setInterval(() => {
+      if (this.net !== net || !this.race) return;
+      // Noticing the other phone has gone belongs on this clock too. In the
+      // render loop it was as late as the frame rate, which on the device most
+      // likely to lose its connection is the frame rate least able to say so.
+      if (net.lastHeard && performance.now() / 1000 - net.lastHeard > DROP_AFTER) {
+        if (net.role === 'host') this.guestLeft(); else this.hostLeft();
+        return;
+      }
+      if (net.role === 'host') net.link?.send(snapshot(this.race));
+      else net.link?.send({ t: MSG.INPUT, b: packButtons(this.input.state), q: net.seq++ });
+    }, 1000 / hz);
+  }
+
+  stopPump() {
+    if (this.net?.pump) clearInterval(this.net.pump);
+    if (this.net) this.net.pump = 0;
+  }
+
   /** Drop any multiplayer session - on quitting, restarting or finishing. */
   endNet() {
     if (!this.net) return;
+    this.stopPump();
     this.net.session?.cancel?.();
     this.net.link?.close?.();
     this.net = null;
@@ -897,6 +947,7 @@ class Game {
         this.net.seq = 0;
       }
       this.hud.setLaps(start.laps);
+      this.startPump();
     } else {
       race = new Race(this.track, entries, this.settings,
         this.trackSpec().gridLanes).build(this.settings.car);
@@ -1050,34 +1101,21 @@ class Game {
     if (!race) return;
 
     const net = this.net;
-    // Silence is the only reliable sign the other phone has gone. A closed tab
-    // fires nothing at all, and a phone that goes to sleep mid-race fires it
-    // far too late - so both ends watch the clock rather than trusting the
-    // transport to tell them.
-    if (net && net.lastHeard && now / 1000 - net.lastHeard > DROP_AFTER) {
-      if (net.role === 'host') this.guestLeft(); else this.hostLeft();
-      return;
-    }
-
+    // Silence is the only reliable sign the other phone has gone - a closed tab
+    // fires nothing at all and a sleeping phone fires far too late - and that
+    // watch is kept by `startPump`, on a wall clock, along with the heartbeat
+    // itself.
     if (!net) {
       race.update(dt, this.input);
     } else if (net.role === 'host') {
       // The host runs the real race and tells the other phone about it.
       race.update(dt, this.input);
-      net.sinceSnap += dt;
-      if (net.sinceSnap >= 1 / SNAPSHOT_HZ) {
-        net.sinceSnap = 0;
-        net.link?.send(snapshot(race));
-      }
+      // The snapshot goes out on `startPump`'s clock, not this one.
     } else {
       // The guest predicts its own car, is told about everyone else, and sends
       // nothing but which buttons are down.
       net.view.update(dt, this.input, now / 1000);
-      net.sinceInput += dt;
-      if (net.sinceInput >= 1 / INPUT_HZ) {
-        net.sinceInput = 0;
-        net.link?.send({ t: MSG.INPUT, b: packButtons(this.input.state), q: net.seq++ });
-      }
+      // Buttons go out on `startPump`'s clock, not this one.
       // The lights are the host's to run, so mirror whatever the last snapshot
       // said rather than counting down locally. Watch the *state* as well as
       // the count: the fifth bulb lights while the race is still counting
@@ -1128,7 +1166,7 @@ class Game {
     dom('result-sub').textContent = won
       ? 'Ka-chow!'
       : `${ordinal(car.place)} out of ${this.race.field.length}`;
-    dom('result-order').innerHTML = this.race.order.slice(0, 7).map((c, i) => {
+    dom('result-order').innerHTML = this.race.order.map((c, i) => {
       const spec = c.spec;
       // A car in the wall gets a place like everybody else - it is classified,
       // not deleted - but says why it is down there.
@@ -1138,6 +1176,11 @@ class Game {
         <span class="cname">${spec.name}</span></li>`;
     }).join('');
     dom('result').classList.remove('hidden');
+    // Eighteen finishers do not fit, so put the player's own line in view.
+    // Being told you came 17th and having to hunt for yourself is not a
+    // result screen, it is a puzzle.
+    dom('result-order').querySelector('.me')
+      ?.scrollIntoView({ block: 'center' });
   }
 
   goFullscreen() {

@@ -160,6 +160,23 @@ button.big.ghost {
 }
 
 .cards { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; }
+/* Eighteen cars do not fit a phone, and never will.
+   The picker scrolls inside its own box so the *panel* keeps its shape: the
+   rule here is that BACK stays on the screen, and a wrapping list of eighteen
+   cards pushed it off at every size tested. The scrollbar is left visible on
+   purpose - a list that scrolls with nothing to say so is a list a
+   five-year-old thinks has four cars in it. */
+#car-picker {
+  flex-wrap: wrap;
+  max-height: min(30vh, 190px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  /* Fade the last row rather than slicing it: a half-visible card reads as a
+     rendering fault, a fade reads as "there is more down here". */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+}
 .card {
   flex: 1 1 118px;
   display: flex;
@@ -263,7 +280,17 @@ button.big.ghost {
 #opt-volume { width: 100%; accent-color: var(--red); height: 22px; margin: 0; }
 
 /* results */
-.order { list-style: none; margin: 0; padding: 0; width: 100%; max-width: 420px; }
+/* The finishing order scrolls inside itself, never by pushing the panel.
+   Eighteen finishers are taller than a phone in landscape, and RACE AGAIN and
+   MENU below them have to stay on the screen: losing a button off the bottom
+   is how the owner once concluded a whole feature was missing. */
+.order {
+  list-style: none; margin: 0; padding: 0; width: 100%; max-width: 420px;
+  max-height: min(42vh, 250px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
 .order li {
   display: flex;
   align-items: center;

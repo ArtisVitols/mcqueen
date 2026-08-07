@@ -22,6 +22,18 @@ dl 1z4iN5vIWUhcE7erlPGlgp1zsh8NaVrN- doc_hudson.zip
 # Pit crew and paddock scenery, not racers - see "racer": false in cars.json.
 dl 1hlJxOhn0fqldAlxlrPElEJOUplPfUZY5 guido.glb
 dl 1ccKUss0KPzDvUIXIAWElo0ecXJKIlR4u mack.glb
+# The rest of the field. Added when the owner asked for every car on the grid.
+dl 156o5CdQEfnirwLCmzCVlWDo3jpjurH93 carla_veloso.glb
+dl 1OPYUlDK5ltxG3Y-Aga55S34wEObnRtP5 claude_scruggs.glb
+dl 1dtxpc2Jtj5RrGrwPGDQJfKILRuImNR_l cruz_ramirez.glb
+dl 1nQzOuBMggsb6FypZcWYksoNZ6LCAIs2e darrel_cartrip.glb
+dl 1ZpYisYy0OFLKLtvSuJX-C7-EwEl1jzKJ fillmore.glb
+dl 1-ZMsj4keFumNwk7e572eFqSf6TfBCo0E finn_mcmissle.glb
+dl 1309XIDVpatuG_iHdCNMwIRLs_-XkCTOI ivy.glb
+dl 1zqA56hnkvBSBcsWpS2JUf1lKaCNmbZrH michael_schumacher_ferrari.glb
+dl 1Oc_ONv6xX5v9vijWR7-YpOENwJa0XsCW sally_carrera.glb
+dl 1VjE9Xn_4To-eBEYEWNPhuzRIDwxzzN4Q sarge.glb
+dl 1nYMiRaqnr4pT2YH5v0blE4o6OYmEhnic shu_todoroki.glb
 dl 19aGhX9W7IiqlQ49xtTzVTBJ_qmjTMT6A speedway.glb
 dl 1LjtNoYQuki08Cjl-4lzOaMB_TvDDgUGo motor_speedway_of_the_south.glb
 dl 1Afjldi0myxASoDico8WBZYHkffamog6J palm_mile_speedway.glb

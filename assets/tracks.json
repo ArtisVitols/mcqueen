@@ -23,7 +23,8 @@
       "pitBoxMaterials": [
         "Material.100"
       ],
-      "pitMinWidth": 12
+      "pitMinWidth": 12,
+      "pitBoxes": 18
     },
     {
       "id": "palm",
@@ -46,7 +47,8 @@
       ],
       "pitScan": 40,
       "pitMinWidth": 13,
-      "pitByWidth": true
+      "pitByWidth": true,
+      "pitBoxes": 18
     },
     {
       "id": "yoyle",
@@ -73,7 +75,8 @@
       "widen": true,
       "profileSamples": 11,
       "pitMaterials": [],
-      "pitScan": 120
+      "pitScan": 120,
+      "pitBoxes": 18
     }
   ]
 }

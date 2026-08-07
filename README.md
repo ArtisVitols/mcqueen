@@ -53,18 +53,30 @@ side of the road - against the wall or down on the apron - and takes no
 further part. It never happens right next to you, and there are never more
 than two in a race. They still appear on the results sheet, marked **OUT**.
 
+## The field
+
+Eighteen cars race, and you can drive any of them. They are not all as quick as
+each other: Mater is the slowest by a clear margin, Fillmore and Sarge are next,
+and the racers at the sharp end are within a per cent of one another. Each race
+draws slightly different form for every car, so the order is never quite the
+same twice.
+
+**Whichever car you pick is the fastest thing out there** - a rival's cruising
+pace is always below yours. What they can do is come back at you: get past one
+on Hard and it will hunt you down for about fifteen seconds before settling.
+
 ## The museum
 
 **MUSEUM** on the menu opens a showroom: each car on a lit plinth, turning
 slowly. Drag to spin it round, pinch to zoom, and use the arrows to step
-through all nine - the seven racers plus Guido and Mack, who do not race but
-are worth a look.
+through all twenty - the eighteen racers plus Guido and Mack, who do not race
+but are worth a look.
 
 ## Two players
 
 **2 PLAYERS** on the menu. One of you taps HOST and reads out the four-letter
-code; the other taps JOIN and types it. You then race each other *and* the five
-AI cars on the usual grid, from anywhere - it goes phone to phone over WebRTC,
+code; the other taps JOIN and types it. You then race each other *and* the rest
+of the field on the usual grid, from anywhere - it goes phone to phone over WebRTC,
 using a free public broker only to introduce the two devices.
 
 The host picks the circuit, the laps, the handling and how hard the AI is.

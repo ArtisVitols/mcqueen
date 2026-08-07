@@ -1,5 +1,5 @@
 {
-  "_comment": "yaw is the rotation in radians needed to make the model face +Z. All seven models already face +Z. Verify with tools/diag_cars.mjs, which renders them textured from the front: these characters have eyes on the windscreen, so the front is unmistakable. An untextured silhouette is not enough - reading one wrong had Chick Hicks racing backwards. length is the real-world length in metres the model is scaled to at load; the raw models range from 5 units to 2005 units so scale is always derived from the bounding box. \"racer\": false marks a model that is in the game but not on the grid: Guido is the pit crew and Mack is parked in the pits. They still load, and the museum still shows them - they are cars, and the showroom is for looking at cars - but Race never builds a Car for them.",
+  "_comment": "yaw is the rotation in radians needed to make the model face +Z. All but Finn McMissile face +Z; his model lies along X, hence his yaw of pi/2. Verify with tools/diag_cars.mjs, which renders them textured from the front: these characters have eyes on the windscreen, so the front is unmistakable. An untextured silhouette is not enough - reading one wrong had Chick Hicks racing backwards. length is the real-world length in metres the model is scaled to at load; the raw models range from 5 units to 2005 units so scale is always derived from the bounding box. \"racer\": false marks a model that is in the game but not on the grid: Guido is the pit crew and Mack is parked in the pits. They still load, and the museum still shows them - they are cars, and the showroom is for looking at cars - but Race never builds a Car for them.",
   "cars": [
     {
       "id": "lightning_mcqueen",
@@ -19,7 +19,7 @@
       "colour": "#3ba845",
       "yaw": 0,
       "length": 4.9,
-      "pace": 1.0,
+      "pace": 0.98,
       "aggression": 1.0,
       "lane": -2.5
     },
@@ -30,7 +30,7 @@
       "colour": "#2f6fd0",
       "yaw": 0,
       "length": 5.0,
-      "pace": 0.99,
+      "pace": 0.97,
       "aggression": 0.5,
       "lane": 1.5
     },
@@ -41,7 +41,7 @@
       "colour": "#20304a",
       "yaw": 0,
       "length": 4.7,
-      "pace": 1.01,
+      "pace": 1.0,
       "aggression": 0.9,
       "lane": -1.0
     },
@@ -52,7 +52,7 @@
       "colour": "#d63a2c",
       "yaw": 0,
       "length": 4.9,
-      "pace": 1.0,
+      "pace": 0.99,
       "aggression": 0.85,
       "lane": 3.0
     },
@@ -63,7 +63,7 @@
       "colour": "#1b3f8f",
       "yaw": 0,
       "length": 5.1,
-      "pace": 0.98,
+      "pace": 0.95,
       "aggression": 0.45,
       "lane": -3.5
     },
@@ -74,9 +74,130 @@
       "colour": "#8a6a3c",
       "yaw": 0,
       "length": 5.2,
-      "pace": 0.95,
+      "pace": 0.84,
       "aggression": 0.3,
       "lane": 4.0
+    },
+    {
+      "id": "michael_schumacher_ferrari",
+      "name": "Michael Schumacher",
+      "number": "SF1",
+      "colour": "#b31217",
+      "yaw": 0,
+      "length": 4.6,
+      "pace": 1.0,
+      "aggression": 0.95,
+      "lane": -0.5
+    },
+    {
+      "id": "shu_todoroki",
+      "name": "Shu Todoroki",
+      "number": "7",
+      "colour": "#cf4a3f",
+      "yaw": 0,
+      "length": 4.8,
+      "pace": 0.99,
+      "aggression": 0.8,
+      "lane": 2.0
+    },
+    {
+      "id": "carla_veloso",
+      "name": "Carla Veloso",
+      "number": "8",
+      "colour": "#1f9d55",
+      "yaw": 0,
+      "length": 4.8,
+      "pace": 0.99,
+      "aggression": 0.75,
+      "lane": -2.0
+    },
+    {
+      "id": "cruz_ramirez",
+      "name": "Cruz Ramirez",
+      "number": "51",
+      "colour": "#f2c12e",
+      "yaw": 0,
+      "length": 4.6,
+      "pace": 0.98,
+      "aggression": 0.8,
+      "lane": 0.5
+    },
+    {
+      "id": "claude_scruggs",
+      "name": "Claude Scruggs",
+      "number": "35",
+      "colour": "#b8a400",
+      "yaw": 0,
+      "length": 4.9,
+      "pace": 0.96,
+      "aggression": 0.6,
+      "lane": 2.5
+    },
+    {
+      "id": "finn_mcmissle",
+      "name": "Finn McMissile",
+      "number": "007",
+      "colour": "#4f6a86",
+      "yaw": -1.5707963,
+      "length": 4.6,
+      "pace": 0.96,
+      "aggression": 0.7,
+      "lane": -3.0
+    },
+    {
+      "id": "darrel_cartrip",
+      "name": "Darrell Cartrip",
+      "number": "17",
+      "colour": "#7c4bbd",
+      "yaw": 0,
+      "length": 4.9,
+      "pace": 0.95,
+      "aggression": 0.55,
+      "lane": 3.5
+    },
+    {
+      "id": "sally_carrera",
+      "name": "Sally Carrera",
+      "number": "911",
+      "colour": "#7ba7d7",
+      "yaw": 0,
+      "length": 4.4,
+      "pace": 0.94,
+      "aggression": 0.55,
+      "lane": -1.5
+    },
+    {
+      "id": "ivy",
+      "name": "Ivy",
+      "number": "IVY",
+      "colour": "#3fb3b8",
+      "yaw": 0,
+      "length": 3.8,
+      "pace": 0.93,
+      "aggression": 0.5,
+      "lane": 1.0
+    },
+    {
+      "id": "fillmore",
+      "name": "Fillmore",
+      "number": "VW",
+      "colour": "#8fbf8a",
+      "yaw": 0,
+      "length": 4.5,
+      "pace": 0.9,
+      "aggression": 0.35,
+      "lane": 3.2
+    },
+    {
+      "id": "sarge",
+      "name": "Sarge",
+      "number": "SGT",
+      "colour": "#5c6b3c",
+      "yaw": 0,
+      "length": 3.6,
+      "pace": 0.9,
+      "aggression": 0.4,
+      "lane": -3.2
     },
     {
       "id": "guido",

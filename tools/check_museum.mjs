@@ -12,13 +12,19 @@
  *   node tools/check_museum.mjs
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from './node/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// How many cars are on the grid. Read from the data rather than written
+// here: the field grew from seven to eighteen in one commit, and a test
+// that hardcodes the number fails for a reason that has nothing to do
+// with what it is checking.
+const FIELD = JSON.parse(readFileSync(join(ROOT, 'assets/cars.json'), 'utf8'))
+  .cars.filter((c) => c.racer !== false).length;
 const OUT = join(homedir(), 'mcqueen-shots');
 const CHROME = join(homedir(), '.local/chrome/chrome-headless-shell-linux64/chrome-headless-shell');
 const PORT = 8331;
@@ -159,7 +165,7 @@ const racing = await page.evaluate(() => {
   return { kmh: Math.round(p.speedKmh), cars: window.game.race.field.length,
            fov: window.game.camera.fov };
 });
-racing.kmh > 30 && racing.cars === 7
+racing.kmh > 30 && racing.cars === FIELD
   ? ok(`racing normally after a museum visit (${racing.kmh} km/h, ${racing.cars} cars)`)
   : fail(JSON.stringify(racing));
 await page.screenshot({ path: join(OUT, 'museum_then_race.png') });

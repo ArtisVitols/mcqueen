@@ -210,6 +210,49 @@ is the old code moved verbatim, so its race pacing is unchanged and the
   raw per-step difference of a thousandth of a radian reads as 0.6 rad/s, which
   at racing speed is 40 m/s^2 of cornering load that is not there.
 
+## The field
+
+**Eighteen cars, and every one of them races.** The owner asked for the whole
+Drive folder on the grid, so `cars.json` carries eighteen racers plus Guido and
+Mack, who are still `"racer": false` - the pit crew and the parked transporter.
+
+- **Pace is a ladder in `cars.json`, plus a draw.** `spec.pace` is the car's
+  *character* - Mater is slow every time - and `Driver` multiplies it by
+  `1 +/- PACE_JITTER` drawn once per race, so the order the field settles into
+  is not identical every time. Mater sits at 0.84 with the next slowest at
+  0.90, deliberately clear: a jitter that could lift the slowest car past
+  somebody would make "the tow truck is the slowest" merely usually true.
+- **A human is always the quickest thing on the circuit, at cruising pace.**
+  That falls out of `aiSpeed` being below `playerSpeed` on every difficulty -
+  5% on Normal and Hard, 12% on Easy - and it holds whichever car is picked,
+  because a human's speed comes from the difficulty and never from `spec.pace`.
+  Both humans in a two-player race get the same. `PACE_CEILING` only stops a
+  `pace` typed above 1 in the data from quietly taking that margin away; the
+  *chase* pace is still allowed above the player, which is the whole point of
+  Hard.
+- **The download roughly doubled**, and that is the price of the ask: cars are
+  1.6 MB no longer, they are 3.9 MB, so a session is about 5.2 MB on Motor
+  Speedway. Every car is loaded before the menu appears, because every car is
+  on the grid. If that ever needs to come down, the shape of the fix is to
+  show the menu after the player's own car and load the rest during the
+  countdown - not to compress the textures further, which the museum would
+  show up immediately.
+- **Eighteen of anything does not fit a phone.** The car picker and the
+  finishing order each scroll *inside their own box*, never by growing the
+  panel: BACK, RACE AGAIN and MENU have to stay on screen, and the results
+  screen scrolls the player's own line into view because being told you came
+  seventeenth and having to hunt for yourself is a puzzle, not a result.
+- **A wheel is a place, not a mesh.** Cruz Ramirez and Shu Todoroki carry the
+  tyre and the rim as separate materials, so clustering islands *within* one
+  mesh gave each car eight wheels and four steered ones; Finn McMissile's split
+  across meshes left too few in each to reach `MIN_WHEELS` and he got none at
+  all. `fromSplit` now gathers every wheel-shaped island from every mesh first
+  and only then decides which of them are the same wheel.
+- **Finn McMissile lies along X**, so his `yaw` is -pi/2 - and it is *minus*,
+  which only the textured render says. At +pi/2 he showed the camera his boot,
+  which is exactly how Chick Hicks shipped backwards. `diag_cars.mjs` takes a
+  list of car ids now, because eighteen in one frame are too small to read.
+
 ## Rivals that fight back
 
 `Driver.fight` is 0..1 and the rule is one line: **a rival chases while a
@@ -624,7 +667,7 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
 
 **2 PLAYERS** on the main menu; START is still single-player and unchanged.
 One phone hosts and shows a four-letter code, the other types it in, and they
-race each other plus five AI on the usual grid.
+race each other plus the rest of the field on the usual grid.
 
 `src/net.js` is the protocol, `src/net/guest.js` the guest's view, and there
 are three transports behind one `send` / `onMessage` / `close` interface:
@@ -655,6 +698,15 @@ tested headlessly - see `tools/check_netplay.mjs`.
   and sets `window.Peer`. It is injected as a `<script>` the first time
   somebody chooses multiplayer, so a single-player session never downloads the
   93 KB.
+- **The heartbeat runs on a wall clock, not on frames.** Sending from the
+  render loop ties "am I still here" to the frame rate, so a phone struggling
+  with a full grid looks exactly like a phone that has been switched off: with
+  eighteen cars, two tabs under a software renderer each dropped the other
+  mid-race and neither had gone anywhere. `startPump` is a `setInterval`, and
+  the drop check sits on it too - in the loop it was as late as the frame rate,
+  on the device least able to afford the delay. `DROP_AFTER` went 5 -> 12 s for
+  the same reason: five seconds is fine for "gone" and far too tight for
+  "having a hard time".
 - **Silence is the only reliable sign the other phone has gone.** A closed tab
   fires no event at all and a sleeping phone fires one far too late, so both
   ends watch a clock (`DROP_AFTER`) instead of trusting the transport. The
@@ -940,7 +992,7 @@ What "good" looks like right now:
   improved. Worst heading seen anywhere is 81° with every car still finishing;
   the run asserts nothing exceeds 172°, which is where `maxPsi` would be
   holding it.
-- `check_wheels.mjs` — the expected count on all nine models (four for the
+- `check_wheels.mjs` — the expected count on all twenty models (four for the
   racers, three for Guido, ten for Mack), two steered wheels each, every one
   turning 90° for a quarter turn the same way. It checks numerically *and*
   renders, because a tyre is nearly symmetric and a spinning one photographs
@@ -954,8 +1006,15 @@ What "good" looks like right now:
   every difficulty an identical six passes and hid the thing being measured.
   Passes alone are ambiguous too: zero means both "dominant, nobody left to
   pass" and "cannot get by". The conversion rate separates them. Today:
-  under Arcade, Normal converts 40% with nobody taking a place back and Hard
-  converts 14% from five times as many duels while giving 10 places back.
+  **the conversion rate is no longer the difficulty signal, and that is a
+  measurement change rather than a regression.** With eighteen cars the player
+  is in traffic the whole race, so the rate reads how dense the pack is at
+  least as much as how hard it is to pass - it now comes out *higher* on Hard
+  than on Normal under two of the three models while every other number says
+  Hard is plainly harder. What is asserted is what still tracks: Hard gives
+  three to seven times the duels and takes back three to seven times the
+  places. Today, across the circuits: Arcade 15 duels and 5 places lost on
+  Normal against 109 and 38 on Hard.
   **Read it per circuit as well as in total.** The totals looked perfectly
   healthy for a release in which Motor Speedway on Hard produced *one duel in
   five laps* - the player pulled clear, went out of `FIGHT_FORGET` range, and
@@ -1013,8 +1072,9 @@ What "good" looks like right now:
   says nothing about the broker: only two real devices can.
 - Ride quality: vertical jitter under ~0.5 g at 50 m/s and yaw wobble under
   0.1 deg per station. Above about 1 g the car visibly shakes.
-- A session downloads ~3.5 MB and reaches the menu in about 5 s, because only
-  the selected circuit loads. `assets/` totals ~9 MB across all three; the
+- A session downloads ~5.2 MB on Motor Speedway and reaches the menu in about
+  8 s, because only the selected circuit loads - but *every* car does, and
+  there are twenty of them at 3.9 MB. `assets/` totals ~14 MB; the
   420k-triangle Yoyleland model is 5.9 MB of that and only arrives if picked.
   PeerJS is another 93 KB and only arrives if somebody taps 2 PLAYERS - keep it
   that way.

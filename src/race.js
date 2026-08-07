@@ -105,6 +105,7 @@ export class Race {
     // is accounted for - a retired car never crosses the line, and a race that
     // waits for it to do so never ends.
     this.retired = [];
+    this.incidents = 0;                     // incidents *started*, see maybeCrash
     // Tests that measure something else turn this off: `check_pits` asserts
     // every car takes a stop, and a car in the wall cannot.
     this.crashRate = CRASH_RATE;
@@ -389,7 +390,11 @@ export class Race {
    * simulated race is still reproducible.
    */
   maybeCrash(car, dt) {
-    if (!this.crashRate || this.retired.length >= CRASH_MAX) return;
+    // Counted from the moment an incident *starts*, not from when the car
+    // finally stops. It takes a few seconds to come to rest, and with a
+    // full grid several rivals rolled the dice inside that window: the cap
+    // read two and let five of them off the road.
+    if (!this.crashRate || this.incidents >= CRASH_MAX) return;
     if (car.crash !== null || car.out || car.finished || car.onPit) return;
     // Not off the line, and not on the run to the flag: an incident wants to
     // be something that happens *during* the race.
@@ -403,6 +408,7 @@ export class Race {
     }
     if (this.rng() < this.crashRate * dt) {
       car.crash = 0;
+      this.incidents++;
       // Half of them slide down to the apron and half run up to the wall,
       // because a race where every incident looks the same stops being one.
       car.crashSide = this.rng() < 0.5 ? 1 : -1;
@@ -602,6 +608,9 @@ export class Race {
   /** Cars nudge each other apart instead of occupying the same metre of track. */
   separate(dt) {
     const f = this.field;
+    // Cars that are where they are meant to be and are not going to be moved:
+    // a wreck at the roadside, and a car stopped on its mark being serviced.
+    const fixed = (c) => c.out || c.pit === Pit.STOPPED || c.pit === Pit.SERVICE;
     for (let i = 0; i < f.length; i++) {
       for (let j = i + 1; j < f.length; j++) {
         const a = f[i], b = f[j];
@@ -610,9 +619,12 @@ export class Race {
         // the same road can touch.
         if (a.road !== b.road) continue;
         // A parked car is scenery: it pushes, it does not get pushed. Letting
-        // the contact move it would walk a wreck back onto the racing line
-        // one nudge at a time.
-        if (a.out && b.out) continue;
+        // the contact move it would walk a wreck back onto the racing line -
+        // or a car off the mark its crew is working on - one nudge at a time.
+        // Being *serviced* counts: with eighteen boxes the lane is tight
+        // enough that a car peeling into its own drives across its
+        // neighbour's, and the one on the mark is the one that must not move.
+        if (fixed(a) && fixed(b)) continue;
         const ds = a.road.delta(a.s, b.s);
         if (Math.abs(ds) > 5.2) continue;
         const dn = b.n - a.n;
@@ -625,10 +637,10 @@ export class Race {
         const dir = dn >= 0 ? 1 : -1;
         // One of them may be immovable, and then the other one does all the
         // moving - the same total separation, out of one car instead of two.
-        const share = a.out || b.out ? 1 : 0.5;
+        const share = fixed(a) || fixed(b) ? 1 : 0.5;
         const want = overlap * share;
-        if (!a.out) { a.n -= dir * Math.min(want, this.room(a, -dir)); this.clampLateral(a); }
-        if (!b.out) { b.n += dir * Math.min(want, this.room(b, dir)); this.clampLateral(b); }
+        if (!fixed(a)) { a.n -= dir * Math.min(want, this.room(a, -dir)); this.clampLateral(a); }
+        if (!fixed(b)) { b.n += dir * Math.min(want, this.room(b, dir)); this.clampLateral(b); }
 
         // If they still overlap there is simply no room to run side by side
         // here, so the car behind lifts rather than being pushed off the road.
@@ -639,7 +651,7 @@ export class Race {
         // tail that is most of the race.
         const left = 2.3 - Math.abs(b.n - a.n);
         const behind = ds > 0 ? a : b;
-        if (behind.out) continue;                 // it is already stopped
+        if (fixed(behind)) continue;              // it is already stopped
         const keep = left > 0 ? 1 - Math.min(0.35, left * 0.2) : 0.6;
         behind.speed *= Math.pow(keep, dt);
       }

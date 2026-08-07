@@ -20,6 +20,9 @@ const OUT = join(homedir(), 'mcqueen-shots');
 const CHROME = join(homedir(), '.local/chrome/chrome-headless-shell-linux64/chrome-headless-shell');
 const PORT = 8190;
 const TRACK = process.argv[2] || 'msots';
+// Optional list of car ids for the facing sheet. Eighteen cars in one frame
+// are too small to read, and reading one wrong is how a car ships backwards.
+const ONLY = process.argv.slice(3);
 
 mkdirSync(OUT, { recursive: true });
 const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1'],
@@ -125,7 +128,7 @@ await page.screenshot({ path: join(OUT, `diag_${TRACK}_side.png`) });
 console.log(`\nwrote diag_${TRACK}_side.png`);
 
 // --- textured three-quarter view of every car -------------------------------
-await page.evaluate(async () => {
+await page.evaluate(async (only) => {
   const THREE = await import('three');
   const g = window.game;
   const scene = new THREE.Scene();
@@ -138,28 +141,34 @@ await page.evaluate(async () => {
   // they bind to the world matrix they had at load - so McQueen is checked
   // separately, in place, by the shot below.
   const specs = g.carSpecs.filter((s) => !g.models.get(s.id).object
-    .getObjectByProperty('isSkinnedMesh', true));
+    .getObjectByProperty('isSkinnedMesh', true))
+    .filter((s) => !only.length || only.includes(s.id));
   specs.forEach((spec, i) => {
     const m = g.models.get(spec.id).object;
     m.visible = true;
-    m.position.set((i - (specs.length - 1) / 2) * 6.2, 0, 0);
+    // Two rows once the field outgrew one: eighteen cars on a single line
+    // put half of them outside the frame, and a picture you cannot see the
+    // cars in is exactly how a car shipped facing backwards.
+    const per = 3;
+    const row = Math.floor(i / per), col = i % per;
+    m.position.set((col - (per - 1) / 2) * 6.2, 0, row * -8.5);
     m.quaternion.identity();          // local +Z is "forward" by our convention
     scene.add(m);
   });
   const cam = new THREE.PerspectiveCamera(42, 1100 / 620, 0.1, 400);
   // Look from front-right-above so a car facing +Z shows us its face.
-  cam.position.set(6, 11, 44);
+  cam.position.set(1, 7, 17);
   cam.up.set(0, 1, 0);
-  cam.lookAt(0, 0.4, 0);
+  cam.lookAt(0, 0.6, -6);
   g.renderer.render(scene, cam);
   window.__labels = specs.map((s) => s.id).join(' | ');
-});
+}, ONLY);
 await sleep(700);
 await page.evaluate(() => { document.getElementById('hud').classList.add('hidden');
                             document.getElementById('controls').classList.add('hidden'); });
 await sleep(200);
 await page.screenshot({ path: join(OUT, 'diag_car_facing.png') });
-console.log('wrote diag_car_facing.png  (left to right):');
+console.log('wrote diag_car_facing.png  (three per row, front row first):');
 console.log(' ', await page.evaluate(() => window.__labels));
 console.log('  camera is in front; a correctly oriented car shows its face');
 

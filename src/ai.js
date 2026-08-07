@@ -77,12 +77,36 @@ const DEFEND_STEP = 1.4;    // how far towards the inside the move goes
 const DEFEND_HOLD = 2.5;    // seconds the covered line is held
 const DEFEND_COOL = 4.0;    // ... before the line may be covered again
 
+/**
+ * How much of a car's own pace is drawn fresh each race.
+ *
+ * `spec.pace` is the car's *character* - Mater is slow because Mater is slow,
+ * every time - and this is the bit on top that makes one race different from
+ * the next. Small on purpose: big enough that the order the field settles into
+ * is not the same every time, small enough that it never reorders the ladder
+ * around it. Mater sits clear of the rest of the field for that reason: a
+ * jitter that could lift the slowest car past somebody would make "the tow
+ * truck is the slowest" a thing that is usually true, which is not the same
+ * thing at all.
+ */
+const PACE_JITTER = 0.025;
+/**
+ * ... and no rival is ever quicker than a person, at its cruising pace.
+ *
+ * The margin itself comes from `aiSpeed` being below `playerSpeed` on every
+ * difficulty, which is 5% on Normal and Hard and 12% on Easy. This is only
+ * here so that a `pace` typed above 1 in cars.json cannot quietly take that
+ * away - the chase pace is allowed above the player, and nothing else is.
+ */
+const PACE_CEILING = 1.0;
+
 export class Driver {
   constructor(car, spec, rng) {
     this.car = car;
     this.baseLane = spec.lane;
     this.lane = spec.lane;
-    this.pace = spec.pace;
+    this.pace = Math.min(PACE_CEILING, spec.pace) *
+                (1 + (rng() * 2 - 1) * PACE_JITTER);
     this.aggression = spec.aggression;
     this.rng = rng;
     this.commit = 0;          // seconds left on the current overtake

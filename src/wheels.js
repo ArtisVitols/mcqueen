@@ -199,24 +199,74 @@ function carAxis(pivot, parentInv, x, y, z) {
 /* ------------------------------------------------------------- the split -- */
 
 function fromSplit(pivot) {
-  const out = [];
   const meshes = [];
   pivot.traverse((o) => {
     if (o.isMesh && !o.isSkinnedMesh && o.name !== 'contact-shadow') meshes.push(o);
   });
 
+  // Find every wheel-shaped island in every mesh *first*, and only then decide
+  // which of them are the same wheel.
+  //
+  // Clustering inside one mesh is not enough: Cruz Ramirez and Shu Todoroki
+  // carry the tyre and the rim as separate materials, so each mesh yielded a
+  // clean set of four and the car ended up with eight wheels and four steered
+  // ones. A wheel is a *place*, not a mesh.
+  const found = [];
   for (const mesh of meshes) {
-    const found = splitMesh(pivot, mesh);
-    if (found) out.push(...found);
+    const items = splitMesh(pivot, mesh);
+    if (items) found.push(...items);
   }
-  if (out.length < MIN_WHEELS || out.length > MAX_WHEELS) return null;
+  if (!found.length) return null;
+
+  const clusters = [];
+  found.sort((a, b) => size(b.box).y - size(a.box).y);
+  for (const item of found) {
+    const c = item.box.getCenter(new THREE.Vector3());
+    const near = clusters.find((cl) =>
+      Math.hypot(cl.centre.x - c.x, cl.centre.z - c.z) < Math.max(0.3, cl.radius * 0.9));
+    if (near) { near.items.push(item); near.box.union(item.box); }
+    else clusters.push({ items: [item], box: item.box.clone(), centre: c, radius: size(item.box).y / 2 });
+  }
+  if (clusters.length < MIN_WHEELS || clusters.length > MAX_WHEELS) return null;
+
+  const out = [];
+  for (const cl of clusters) {
+    const centre = cl.box.getCenter(new THREE.Vector3());
+    const node = new THREE.Group();
+    node.position.copy(centre);
+    for (const item of cl.items) {
+      const m = new THREE.Mesh(item.build(), item.material);
+      m.applyMatrix4(new THREE.Matrix4()
+        .makeTranslation(-centre.x, -centre.y, -centre.z).multiply(item.toPivot));
+      m.castShadow = true;
+      m.frustumCulled = false;
+      node.add(m);
+    }
+    pivot.add(node);
+    out.push({
+      kind: 'split',
+      node,
+      base: new THREE.Quaternion(),
+      axle: new THREE.Vector3(1, 0, 0),
+      up: new THREE.Vector3(0, 1, 0),
+      centre,
+      radius: Math.max(MIN_RADIUS, size(cl.box).y / 2),
+      front: false,
+    });
+  }
 
   const steered = frontAxle(out.map((w) => w.centre.z));
   for (const w of out) w.front = steered(w.centre.z);
   return out;
 }
 
-/** Pull every wheel-shaped island out of one mesh into its own pivot. */
+/**
+ * Every wheel-shaped island in one mesh, as items the caller can cluster.
+ *
+ * The triangles are removed from the source mesh here, but the geometry for
+ * each island is only *built* if the caller keeps it - `build()` - because a
+ * cluster may span two meshes and wants one node holding both halves.
+ */
 function splitMesh(pivot, mesh) {
   const geo = mesh.geometry;
   const pos = geo.getAttribute('position');
@@ -279,57 +329,24 @@ function splitMesh(pivot, mesh) {
   }
   if (!keep.length) return null;
 
-  // A wheel can arrive as more than one island - a tyre and a rim, or Mater's
-  // twinned rears - so gather them by where they sit rather than one to one.
-  const clusters = [];
-  keep.sort((a, b) => size(b.box).y - size(a.box).y);
-  for (const item of keep) {
-    const c = item.box.getCenter(new THREE.Vector3());
-    const near = clusters.find((cl) =>
-      Math.hypot(cl.centre.x - c.x, cl.centre.z - c.z) < Math.max(0.3, cl.radius * 0.9));
-    if (near) { near.items.push(item); near.box.union(item.box); }
-    else clusters.push({ items: [item], box: item.box.clone(), centre: c, radius: size(item.box).y / 2 });
-  }
-  if (clusters.length < MIN_WHEELS || clusters.length > MAX_WHEELS) return null;
-
-  const wheels = [];
-  for (const cl of clusters) {
-    const centre = cl.box.getCenter(new THREE.Vector3());
-    const list = cl.items.flatMap((i) => i.list);
+  const items = keep.map(({ list, box }) => ({
+    box,
+    material: mesh.material,
+    toPivot,
     // A compact geometry, not the whole buffer with a narrower index. Sharing
     // the buffer is tempting and cheaper, but every bounding box would still
     // span the entire car: check_ride_height reported the split cars sitting
     // three metres under the road, and shadow and frustum bounds would be just
     // as wrong.
-    const g = extract(geo, list, at);
-    const node = new THREE.Group();
-    node.position.copy(centre);
-    const m = new THREE.Mesh(g, mesh.material);
-    m.applyMatrix4(new THREE.Matrix4()
-      .makeTranslation(-centre.x, -centre.y, -centre.z).multiply(toPivot));
-    m.castShadow = true;
-    m.frustumCulled = false;
-    node.add(m);
-    pivot.add(node);
-
-    wheels.push({
-      kind: 'split',
-      node,
-      base: new THREE.Quaternion(),
-      axle: new THREE.Vector3(1, 0, 0),
-      up: new THREE.Vector3(0, 1, 0),
-      centre,
-      radius: Math.max(MIN_RADIUS, size(cl.box).y / 2),
-      front: false,
-    });
-  }
+    build: () => extract(geo, list, at),
+  }));
 
   // Everything that was not a wheel stays on the original mesh.
   const remaining = [];
   for (const k of rest) remaining.push(at(k), at(k + 1), at(k + 2));
   geo.setIndex(remaining);
   geo.clearGroups();
-  return wheels;
+  return items;
 }
 
 /**

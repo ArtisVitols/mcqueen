@@ -9,13 +9,19 @@
  *   node tools/test_pause.mjs
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from './node/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// How many cars are on the grid. Read from the data rather than written
+// here: the field grew from seven to eighteen in one commit, and a test
+// that hardcodes the number fails for a reason that has nothing to do
+// with what it is checking.
+const FIELD = JSON.parse(readFileSync(join(ROOT, 'assets/cars.json'), 'utf8'))
+  .cars.filter((c) => c.racer !== false).length;
 const OUT = join(homedir(), 'mcqueen-shots');
 const CHROME = join(homedir(), '.local/chrome/chrome-headless-shell-linux64/chrome-headless-shell');
 const PORT = 8211;
@@ -130,8 +136,8 @@ const restarted = await page.evaluate(() => ({
   cars: window.game.race.field.filter((c) => c.model.visible).length,
   optionsClosed: document.getElementById('options').classList.contains('hidden'),
 }));
-restarted.track === 'palm' && restarted.cars === 7 && restarted.kmh > 30 && restarted.optionsClosed
-  ? ok(`restarted on ${restarted.track} (${restarted.lapLength} m, ${restarted.kmh} km/h, 7 cars)`)
+restarted.track === 'palm' && restarted.cars === FIELD && restarted.kmh > 30 && restarted.optionsClosed
+  ? ok(`restarted on ${restarted.track} (${restarted.lapLength} m, ${restarted.kmh} km/h, ${FIELD} cars)`)
   : fail(JSON.stringify(restarted));
 await page.screenshot({ path: join(OUT, 'pause_restarted.png') });
 

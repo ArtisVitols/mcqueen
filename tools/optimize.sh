@@ -47,6 +47,8 @@ track palm_mile_speedway          track-palm.glb   0.60 0.00006
 # hundred pixels tall on a phone. 512 + WebP is visually identical here.
 echo "=== cars ==="
 for car in lightning_mcqueen chick_hicks the_king francesco_bernoulli jackson_storm mater doc_hudson \
+           cruz_ramirez sally_carrera shu_todoroki carla_veloso claude_scruggs darrel_cartrip \
+           michael_schumacher_ferrari finn_mcmissle sarge fillmore ivy \
            guido mack; do
   $GT dedup "raw/$car.glb" "$TMP/d.glb" > /dev/null
   $GT resize "$TMP/d.glb" "$TMP/r.glb" --width 512 --height 512 > /dev/null
