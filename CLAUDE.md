@@ -259,6 +259,15 @@ will move to cover the inside line before you commit. Both are per-difficulty.
   or a defensive move lasts, so every move was abandoned half-finished.
   `COMMITTED_CLOSE` is used while `commit` or `defend` is up, and the ordinary
   gain for drifting back to the line afterwards.
+- **The grudge is a duration, not a halflife.** Half a grudge is still most of
+  the pace, so a rival that had passed you kept its extra 20 km/h for the best
+  part of a minute and simply left. `tuning.grudge` is now *seconds*, wound
+  down linearly to nothing - go past, hold it for about fifteen seconds, come
+  back to me - and each driver draws its own fraction of that at the start, or
+  the whole field stands down on the same frame and it reads as a switch being
+  thrown. Note it can look longer than it is from the cockpit: while you are
+  still trading places, being behind you winds it straight back up, which is
+  the point.
 - **Defending concedes.** One move to cover the inside, held a couple of
   seconds, then a cooldown - and dropped the moment the challenger is
   alongside. Easy sets `defend: 0` outright; a five-year-old holding the
@@ -268,6 +277,49 @@ will move to cover the inside line before you commit. Both are per-difficulty.
   other and a race-stopper when it does not: over five laps the leaders parked
   on the racing line, the last car would not drive through them, and the race
   never ended.
+
+## Incidents
+
+A rival occasionally gets it wrong, runs off the racing line and stops. It is
+there to be watched - a wreck is the best thing that happens in an oval race
+to a five-year-old - and `Race.maybeCrash` / `stepCrash` / `retire` is all of
+it. `check_crashes.mjs` proves it is safe and `shots_crash.mjs` proves it looks
+right.
+
+- **Not a spin.** Under Arcade a car *cannot* spin, and that is the rule the
+  whole game rests on, so this is what getting it wrong looks like here: off
+  the power, wide, speed scrubbed off, parked. The aim is past the edge of the
+  corridor so the car commits all the way there; `Car.step` clamps it to the
+  road, which is where it has to stop anyway.
+- **It stops inside the corridor.** Past that edge is wherever `refine_track`
+  found a drop or a barrier - precisely the place not to leave a car nobody is
+  driving. `retire` parks it half a metre inside the limit, because a car at
+  20 degrees is wider than the half-car-width `Track.limit` reserves and the
+  rest of it would be through the wall.
+- **Never within `CRASH_CLEAR` of a human, including one that has finished.**
+  A car that spears off in front of you and cannot be avoided is not a
+  spectacle, it is the game crashing *you*. They are still on the road after
+  the flag, so the guard does not care whether they are still racing.
+- **A retired car is classified, not deleted.** Its `progress` is frozen, so
+  sorting by progress alone would have it drift down the order all race
+  instead of simply being out of it; `updateOrder` puts `out` last outright.
+  It also never crosses the line, so the race-over test cannot be "everybody
+  finished" - `accountedFor` counts finished *or* out, and the retirements are
+  appended to `results` at the end so the results screen lists everybody. This
+  is the same trap as `coolDown`: a race that waits for a car that will never
+  arrive does not end.
+- **It pushes, it does not get pushed.** `separate` moves the other car by the
+  whole overlap rather than half, and never moves a wreck - letting contact
+  shift it walks it back onto the racing line one nudge at a time.
+- **`out` is on the wire.** The guest sorts its own running order, so without
+  it the two ends disagree about a place. That is what `SNAP_STRIDE` went to 13
+  for.
+- **Tests that measure something else turn it off.** `race.crashRate = 0` in
+  `check_pits` (which asserts every car takes a stop, and a car in the wall
+  cannot) and in `check_racing` (a stationary car would count as a duel drawn
+  and won). `simulate.mjs` leaves it *on* and exempts a retired car from its
+  per-car assertions, because what has to stay true is that the race still
+  ends.
 
 ## Steering, and why it is one function
 
@@ -853,6 +905,8 @@ node tools/check_wheels.mjs        # every wheel found, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
 node tools/check_museum.mjs        # every car on the plinth, and the race after
+node tools/check_crashes.mjs       # rivals have incidents, and they are safe
+node tools/shots_crash.mjs <track> # ... and a picture of one at the roadside
 node tools/check_pits.mjs          # pit roads on asphalt, and a stop end to end
 node tools/shots_pits.mjs <track>  # ... and a picture of Guido doing it
 node tools/check_fullscreen.mjs    # rotate to landscape, and the tap fallback
@@ -900,13 +954,13 @@ What "good" looks like right now:
   every difficulty an identical six passes and hid the thing being measured.
   Passes alone are ambiguous too: zero means both "dominant, nobody left to
   pass" and "cannot get by". The conversion rate separates them. Today:
-  under Arcade, Normal converts 47% with nobody taking a place back and Hard
-  converts 26% from four times as many duels while giving 13 places back.
+  under Arcade, Normal converts 40% with nobody taking a place back and Hard
+  converts 14% from five times as many duels while giving 10 places back.
   **Read it per circuit as well as in total.** The totals looked perfectly
   healthy for a release in which Motor Speedway on Hard produced *one duel in
   five laps* - the player pulled clear, went out of `FIGHT_FORGET` range, and
   nobody ever came back at them, which is exactly what the owner reported.
-  That circuit alone is now 26 duels and 5 places lost. The shape
+  That circuit alone is now 27 duels and 5 places lost. The shape
   is only asserted for the models with a driver aid: Pro has none, so the
   "player" there is a scripted driver whose own quality would dominate the
   numbers, and all that is required of it is that the field is reachable.
@@ -934,6 +988,11 @@ What "good" looks like right now:
   never disturb: that no handover moves a car more than a car's length or
   turns it more than 20 degrees, and that every car's `progress` stays within
   a metre of where it actually is on the road.
+- `check_crashes.mjs` — runs at fifty times the shipped incident rate so every
+  race has one, then checks the things a wreck must never do: leave a car
+  outside the corridor, get shoved back onto the racing line, start on top of
+  the player, be classified ahead of somebody who finished, or stop the race
+  ending. Two cars out per race is the cap and it holds.
 - `check_grid.mjs` — every slot on the racing surface: `Material.105` on Motor
   Speedway, `Material.227` on Palm Mile, `Asphalt` on Yoyleland. Anything else
   and somebody is starting in the pits - `Material.107` in particular *is* the

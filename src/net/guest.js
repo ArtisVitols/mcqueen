@@ -180,6 +180,7 @@ export class GuestView {
           const pst = road.sample(rival.s, this._st);
           rival.n = THREE.MathUtils.clamp(b.n, road.limit(pst, -1), road.limit(pst, 1));
           rival.psi = b.psi;
+          rival.out = b.out;
           rival.speed = b.speed;
           rival.progress = b.progress;
           rival.lap = b.lap;
@@ -205,6 +206,7 @@ export class GuestView {
       rival.lap = b.lap;
       rival.place = b.place;
       rival.finished = b.finished;
+      rival.out = b.out;
       rival.slip = b.slip;
       rival.gear = b.gear;
       rival.sync();

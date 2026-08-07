@@ -138,7 +138,8 @@ function report(run) {
   for (const car of race.order) {
     const tag = car === player ? '  <-- player' : '';
     console.log(`  P${car.place}  ${car.spec.name.padEnd(20)} ` +
-                `lap ${car.lap}  ${car.finishTime ? car.finishTime.toFixed(1) + 's' : '-'}${tag}`);
+                `lap ${car.lap}  ${car.finishTime ? car.finishTime.toFixed(1) + 's' : '-'}` +
+                `${car.out ? '  OUT' : ''}${tag}`);
   }
 
   const problems = [];
@@ -149,15 +150,25 @@ function report(run) {
   }
   // Cars start behind the line on lap 1, so a 3-lap race shows 1->2 and 2->3:
   // one fewer increment than there are laps.
+  // A car that had an incident is exempt from all of this, and that is the
+  // point of checking it rather than turning incidents off here: what has to
+  // stay true is that the *race* still ends, that everybody else still counts
+  // their laps, and that a wreck never leaves a car off the road - which the
+  // corridor check above is already watching.
+  const out = (car) => car.out;
   for (const [car, crossings] of run.lapCrossings) {
+    if (out(car)) continue;
     if (crossings !== laps - 1) {
       problems.push(`${car.spec.name} counted ${crossings} lap changes, expected ${laps - 1}`);
     }
   }
   for (const car of race.field) {
+    if (out(car)) continue;
     if (!car.finished) problems.push(`${car.spec.name} never finished`);
     if (car.lap !== laps) problems.push(`${car.spec.name} ended on lap ${car.lap}, expected ${laps}`);
   }
+  // ... and a race is not a demolition derby.
+  if (race.retired.length > 2) problems.push(`${race.retired.length} cars retired`);
   if (stats.laneChanges < 3) problems.push('almost no lane changes - the AI is not racing');
   if (stats.overtakes < 2) problems.push('almost no position swaps - the field is static');
   if (stats.maxSpeed * 3.6 < 150) problems.push('cars never got up to racing speed');

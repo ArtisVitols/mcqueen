@@ -17,7 +17,8 @@ tap 2 PLAYERS instead - see below.
   difficulty, graphics quality and sound.
 - Difficulty is **Easy** by default: holding the throttle down is enough to
   win, whichever handling model is picked. Normal is close, Hard beats a
-  flat-out player.
+  flat-out player. Once one of them gets past you it keeps that extra pace for
+  about fifteen seconds and then settles back down, so you get another go.
 - The wheels turn at road speed, the front pair steers, and the body leans into
   the corners and noses down under braking.
 - Turn the phone to landscape and it goes fullscreen; if the browser wants a
@@ -41,7 +42,16 @@ have to do. The other cars pit too, so a stop costs you nothing you do not get
 back.
 
 A five-lap race needs no stop. Ten laps needs one, twenty needs three - which
-is what the longer race lengths are for.
+is what the longer race lengths are for. Staying out on dead tyres is not a
+free option: they lose grip *and* top speed, so the car that skips its stop
+comes back to you.
+
+## Incidents
+
+Now and then a rival gets it wrong, runs off the racing line and stops at the
+side of the road - against the wall or down on the apron - and takes no
+further part. It never happens right next to you, and there are never more
+than two in a race. They still appear on the results sheet, marked **OUT**.
 
 ## The museum
 
@@ -192,6 +202,7 @@ node  tools/check_wheels.mjs       # every wheel found, and proof they turn
 node  tools/check_steering.mjs     # does it steer, and does the field weave?
 node  tools/check_racing.mjs       # how hard is it actually to overtake?
 node  tools/check_museum.mjs       # every car on the plinth, and the race after
+node  tools/check_crashes.mjs      # rivals have incidents, and they are safe
 node  tools/check_pits.mjs         # pit roads on asphalt, and a stop end to end
 node  tools/shots_pits.mjs yoyle   # ... and a picture of Guido doing it
 node  tools/check_fullscreen.mjs   # rotate to landscape, and the tap fallback

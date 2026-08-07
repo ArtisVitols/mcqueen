@@ -51,7 +51,11 @@ export const DIFFICULTY = {
     chaseSpeed: 1.00, chaseCorner: 0.98,
   },
   hard: {
-    label: 'Hard', aggression: 1.35, band: 0.12, playerSpeed: 1.0, grudge: 14,
+    // `grudge` is *seconds*: how long they keep the extra pace after getting
+    // back in front of you, wound down to nothing over exactly that time and
+    // scattered per car. Fifteen is what the owner asked for - go past, hold
+    // it, then come back to me.
+    label: 'Hard', aggression: 1.35, band: 0.12, playerSpeed: 1.0, grudge: 15,
     assist: 1.0, lift: 0, fight: 1.0, defend: 1.0,
     // Cruises at Normal's pace so you can catch them and get by...
     aiSpeed: 0.95, aiCorner: 0.92,

@@ -38,10 +38,26 @@ const SAME_LANE = 2.4;      // ... and how close is still *behind* them
 // leader it can see in its mirrors.
 const FIGHT_FORGET = 0.45;      // of a lap
 const FIGHT_RISE = 1.5;     // seconds to wind up to full chase
-// Seconds for the grudge to halve. Per-difficulty, because how long a rival
-// stays angry is as much of a dial as how fast it goes when it is: a short
-// grudge means they attack, fade, and you cruise away from them.
-const FIGHT_HALFLIFE = 8;
+/**
+ * Seconds a rival stays angry once it is back in front of you, wound down to
+ * nothing over exactly that time. Per-difficulty, because how long they stay
+ * angry is as much of a dial as how fast they go while they are.
+ *
+ * It used to be a *halflife*, which is not the same shape at all: half the
+ * grudge is still most of the pace, so a rival that had passed you kept the
+ * extra 20 km/h for the best part of a minute and simply left. What the owner
+ * asked for is that they go past, hold it for about fifteen seconds, and then
+ * come back to you - so this is a duration and the wind-down is linear.
+ */
+const FIGHT_FADE = 10;
+/**
+ * ... and no two of them do it together.
+ *
+ * Each driver gets its own fraction of the difficulty's figure, drawn once at
+ * the start. A field that all stands down on the same frame reads as a switch
+ * being thrown, which is exactly what it would be.
+ */
+const FADE_SPREAD = 0.4;    // +/- this fraction, per car
 const FIGHT_TOW = 0.05;     // a better tow while the grudge is up
 
 /** Blend between a difficulty's cruising value and its chasing one. */
@@ -75,6 +91,10 @@ export class Driver {
     this.defend = 0;          // seconds left holding a covered line
     this.defendCool = 0;
     this.wander = rng() * Math.PI * 2;
+    // How long *this* driver stays angry, as a fraction of the difficulty's
+    // figure. Drawn once, so it is the same car every time within a race and a
+    // different one between races.
+    this.fadeScale = 1 + (rng() * 2 - 1) * FADE_SPREAD;
   }
 
   /**
@@ -109,7 +129,11 @@ export class Driver {
     if (chasing && nearest < forget) {
       this.fight += (ceiling - this.fight) * Math.min(1, dt / FIGHT_RISE);
     } else {
-      this.fight *= Math.pow(0.5, dt / (tuning.grudge ?? FIGHT_HALFLIFE));
+      // Straight down to nothing over the driver's own fade time, so a rival
+      // that has got back in front holds the extra pace for that long and is
+      // then exactly as quick as it was on lap one - which is when the rubber
+      // band starts reeling it back to you again.
+      this.fight -= dt / ((tuning.grudge ?? FIGHT_FADE) * this.fadeScale);
       // Snap the tail to zero, but only on the way *down*. Applied to a value
       // that is winding up, this floor eats the first increment of every step
       // - which is smaller than the floor - and the grudge never leaves zero.

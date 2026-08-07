@@ -202,6 +202,9 @@ for (const spec of todo) {
   const race = new Race(track, entries, { difficulty: 'normal', laps: 12,
     physics: 'arcade', car: 'lightning_mcqueen' }, spec.gridLanes)
     .build('lightning_mcqueen');
+  // No incidents: this file asserts that *every* car takes a stop, and a car
+  // parked in the wall cannot. Incidents are simulate.mjs's to check.
+  race.crashRate = 0;
   const player = race.player;
 
   const DT = 1 / 120;

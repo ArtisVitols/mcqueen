@@ -1130,8 +1130,10 @@ class Game {
       : `${ordinal(car.place)} out of ${this.race.field.length}`;
     dom('result-order').innerHTML = this.race.order.slice(0, 7).map((c, i) => {
       const spec = c.spec;
+      // A car in the wall gets a place like everybody else - it is classified,
+      // not deleted - but says why it is down there.
       return `<li class="${c === car ? 'me' : ''}">
-        <span class="pos">${i + 1}</span>
+        <span class="pos">${c.out ? 'OUT' : i + 1}</span>
         <span class="chip" style="background:${spec.colour}">${spec.number}</span>
         <span class="cname">${spec.name}</span></li>`;
     }).join('');

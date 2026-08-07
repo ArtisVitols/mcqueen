@@ -43,6 +43,29 @@ const PIT_AIM_CLOSE = 3.0;
 // on dead tyres wanting a stop they could never take.
 const PIT_APPROACH = 320;
 
+/**
+ * Incidents: a rival gets it wrong, runs off the racing line and stops.
+ *
+ * A wreck is the best thing that happens in an oval race to a five-year-old
+ * watching one, so this exists purely to be seen. Three rules keep it from
+ * being anything worse than that:
+ *
+ *   - It is **rare**, and capped, so a race is not a demolition derby.
+ *   - It never starts within `CRASH_CLEAR` of a human. A car that spears off
+ *     in front of you and cannot be avoided is not a spectacle, it is the game
+ *     crashing *you*.
+ *   - The car stops **inside the corridor**, at its very edge - against the
+ *     wall on the outside, down on the apron on the inside. Past that edge is
+ *     wherever `refine_track` found a drop or a barrier, which is exactly the
+ *     place not to park a car nobody is driving any more.
+ */
+const CRASH_RATE = 0.001;    // per rival per second, once the race has settled
+const CRASH_MAX = 2;         // ... and never more than this in one race
+const CRASH_CLEAR = 45;      // metres of lap either side of a human
+const CRASH_COAST = 0.7;     // seconds off the throttle before the brakes
+const CRASH_CLOSE = 3.4;     // m/s it is allowed to cross the road at
+const CRASH_STOPPED = 1.2;   // m/s that counts as parked
+
 export const State = {
   COUNTDOWN: 'countdown',
   RACING: 'racing',
@@ -77,6 +100,14 @@ export class Race {
     this.player = null;                     // ... the one on this device
     this.inputs = new Map();                // car -> something with applyTo()
     this.results = [];
+    // Cars that did not get to the end. Kept apart from `results` so the
+    // finishers keep their places and the race can still know when everybody
+    // is accounted for - a retired car never crosses the line, and a race that
+    // waits for it to do so never ends.
+    this.retired = [];
+    // Tests that measure something else turn this off: `check_pits` asserts
+    // every car takes a stop, and a car in the wall cannot.
+    this.crashRate = CRASH_RATE;
     this.state = State.COUNTDOWN;
     this.clock = 0;
     this.lights = 0;
@@ -132,6 +163,8 @@ export class Race {
       car.pitTimer = 0;
       car.pitStops = 0;
       car.pitDone = -1;
+      car.crash = null;                 // seconds into an incident, or null
+      car.out = false;                  // ... and parked at the side for good
 
       const row = Math.floor(i / 2);
       // Row 0 sits just behind the line; the pack stretches back from there.
@@ -287,12 +320,15 @@ export class Race {
 
     for (const driver of this.drivers) {
       const car = driver.car;
+      if (car.out) continue;                    // parked, and staying there
+      if (this.stepCrash(car, dt)) continue;
       if (car.finished) {
         this.coolDown(car, dt);
         continue;
       }
       if (this.stepPit(car, dt)) continue;
       driver.update(dt, this.field, this.tuning, this.physics);
+      this.maybeCrash(car, dt);
       this.rubberBand(car);
       // Rivals stop too, or a stop is a penalty rather than a strategy - and
       // "Easy is winnable by holding the throttle down" would stop being true
@@ -310,6 +346,7 @@ export class Race {
     for (const car of this.humans) this.updateDraft(car);
 
     for (const car of this.field) {
+      if (car.out) continue;                    // nothing left to integrate
       const before = car.lap;
       car.step(dt);
       if (car.lap !== before && car.lap > 1 && car === this.player) {
@@ -319,7 +356,7 @@ export class Race {
         car.finished = true;
         car.finishTime = this.clock;
         this.results.push(car);
-        if (car === this.player || this.results.length === this.field.length) {
+        if (car === this.player || this.accountedFor === this.field.length) {
           this.onFinish?.(this.results.length, car);
         }
       }
@@ -328,7 +365,89 @@ export class Race {
     this.separate(dt);
     this.updateOrder();
 
-    if (this.results.length === this.field.length) this.state = State.FINISHED;
+    if (this.accountedFor === this.field.length && this.state !== State.FINISHED) {
+      // Classify the retirements behind the finishers, the one that got
+      // furthest first, so the results screen lists everybody.
+      this.results.push(...this.retired.slice()
+        .sort((a, b) => b.progress - a.progress));
+      this.state = State.FINISHED;
+    }
+  }
+
+  /** Cars whose race is over one way or the other. */
+  get accountedFor() {
+    let n = 0;
+    for (const car of this.field) if (car.finished || car.out) n++;
+    return n;
+  }
+
+  /**
+   * Roll for an incident.
+   *
+   * Per second rather than per lap, so it does not depend on the circuit or
+   * on how fast this car happens to be going, and off the seeded `rng` so a
+   * simulated race is still reproducible.
+   */
+  maybeCrash(car, dt) {
+    if (!this.crashRate || this.retired.length >= CRASH_MAX) return;
+    if (car.crash !== null || car.out || car.finished || car.onPit) return;
+    // Not off the line, and not on the run to the flag: an incident wants to
+    // be something that happens *during* the race.
+    if (car.lap < 2) return;
+    const left = this.totalLaps * this.track.lapLength - car.progress;
+    if (left < this.track.lapLength * 0.5) return;
+    // Including one that has already taken the flag: they are still on the
+    // road, rolling round to the outside, and still watching.
+    for (const human of this.humans) {
+      if (Math.abs(this.track.delta(human.s, car.s)) < CRASH_CLEAR) return;
+    }
+    if (this.rng() < this.crashRate * dt) {
+      car.crash = 0;
+      // Half of them slide down to the apron and half run up to the wall,
+      // because a race where every incident looks the same stops being one.
+      car.crashSide = this.rng() < 0.5 ? 1 : -1;
+    }
+  }
+
+  /**
+   * One step of an incident: off the power, across the road, and stopped.
+   *
+   * Deliberately not a spin. Under Arcade a car *cannot* spin - that is the
+   * rule the whole game is built on - so this is what a rival getting it wrong
+   * looks like here: it runs wide, scrubs its speed off and parks. The aim is
+   * past the edge of the corridor so it commits all the way there; `Car.step`
+   * clamps it to the road, which is where it should stop anyway.
+   */
+  stepCrash(car, dt) {
+    if (car.crash === null || car.crash === undefined) return false;
+    car.crash += dt;
+    const st = car.road.sample(car.s, car.st);
+    const edge = car.road.limit(st, car.crashSide) + car.crashSide * 3;
+    car.steer = laneSteer(car, edge, dt, CRASH_CLOSE);
+    car.throttle = 0;
+    car.brake = car.crash > CRASH_COAST ? 1 : 0.4;
+    if (car.speed < CRASH_STOPPED) this.retire(car);
+    return true;
+  }
+
+  /** Park a car for good. */
+  retire(car) {
+    const st = car.road.sample(car.s, car.st);
+    // Just inside the edge, not on it: a car sitting at an angle is wider than
+    // the half-car-width `Track.limit` reserves, and half of it would be
+    // through the wall.
+    car.n = car.road.limit(st, car.crashSide) - car.crashSide * 0.5;
+    // Stopped square looks parked; stopped askew looks like it happened.
+    car.psi = car.crashSide * (0.25 + this.rng() * 0.25);
+    car.speed = 0;
+    car.vy = 0;
+    car.throttle = 0;
+    car.brake = 1;
+    car.crash = null;
+    car.out = true;
+    car.finishTime = this.clock;
+    car.sync(st);
+    this.retired.push(car);
   }
 
   /**
@@ -490,6 +609,10 @@ export class Race {
         // at the same lap position and be seventy metres apart. Only cars on
         // the same road can touch.
         if (a.road !== b.road) continue;
+        // A parked car is scenery: it pushes, it does not get pushed. Letting
+        // the contact move it would walk a wreck back onto the racing line
+        // one nudge at a time.
+        if (a.out && b.out) continue;
         const ds = a.road.delta(a.s, b.s);
         if (Math.abs(ds) > 5.2) continue;
         const dn = b.n - a.n;
@@ -500,11 +623,12 @@ export class Race {
         // allows. Shoving them the full distance regardless is how the field
         // ended up outside the corridor wherever the track narrows.
         const dir = dn >= 0 ? 1 : -1;
-        const want = overlap * 0.5;
-        a.n -= dir * Math.min(want, this.room(a, -dir));
-        b.n += dir * Math.min(want, this.room(b, dir));
-        this.clampLateral(a);
-        this.clampLateral(b);
+        // One of them may be immovable, and then the other one does all the
+        // moving - the same total separation, out of one car instead of two.
+        const share = a.out || b.out ? 1 : 0.5;
+        const want = overlap * share;
+        if (!a.out) { a.n -= dir * Math.min(want, this.room(a, -dir)); this.clampLateral(a); }
+        if (!b.out) { b.n += dir * Math.min(want, this.room(b, dir)); this.clampLateral(b); }
 
         // If they still overlap there is simply no room to run side by side
         // here, so the car behind lifts rather than being pushed off the road.
@@ -515,6 +639,7 @@ export class Race {
         // tail that is most of the race.
         const left = 2.3 - Math.abs(b.n - a.n);
         const behind = ds > 0 ? a : b;
+        if (behind.out) continue;                 // it is already stopped
         const keep = left > 0 ? 1 - Math.min(0.35, left * 0.2) : 0.6;
         behind.speed *= Math.pow(keep, dt);
       }
@@ -536,8 +661,16 @@ export class Race {
 
   updateOrder() {
     this.order.sort((a, b) => {
-      if (a.finished !== b.finished) return a.finished ? -1 : 1;
-      if (a.finished && b.finished) return a.finishTime - b.finishTime;
+      // A car in the wall is classified behind everybody who is still going,
+      // whatever its progress says - and its `progress` is frozen, so without
+      // this it would drift down the order as the race went on rather than
+      // simply being out of it. Between two of them, the one that got
+      // furthest is ahead.
+      if (a.out !== b.out) return a.out ? 1 : -1;
+      if (!a.out) {
+        if (a.finished !== b.finished) return a.finished ? -1 : 1;
+        if (a.finished && b.finished) return a.finishTime - b.finishTime;
+      }
       return b.progress - a.progress;
     });
     this.order.forEach((car, i) => { car.place = i + 1; });

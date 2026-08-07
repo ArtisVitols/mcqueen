@@ -91,8 +91,13 @@ function race(trackId, physics, difficulty) {
   const spec = TRACKS.find((t) => t.id === trackId);
   const track = new Track(read(`assets/${spec.data}`));
   const entries = CARS.map((c) => ({ spec: c, object: new THREE.Object3D() }));
-  return new Race(track, entries, { difficulty, laps: LAPS, physics, car: 'lightning_mcqueen' },
+  const r = new Race(track, entries, { difficulty, laps: LAPS, physics, car: 'lightning_mcqueen' },
     spec.gridLanes).build('lightning_mcqueen');
+  // No incidents here. This measures how hard the field is to pass, and a
+  // stationary car is not a measure of that - it would count as a duel drawn
+  // and won, which is exactly the quantity being reported.
+  r.crashRate = 0;
+  return r;
 }
 
 /**
