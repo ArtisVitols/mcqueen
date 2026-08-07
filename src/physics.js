@@ -117,6 +117,30 @@ export function tyreGrip(car) {
   return car.assist * (TYRE_FLOOR + (1 - TYRE_FLOOR) * t);
 }
 
+/**
+ * ... and they are slower in a straight line too.
+ *
+ * Grip alone is not enough, because grip is not what sets the pace here.
+ * **Arcade has no tyre forces at all**, so `tyreGrip` reaches nothing under
+ * the default model and a dead set cost exactly zero - which makes a stop
+ * pure loss and hands the race to whoever skips it. That is not a subtle
+ * imbalance: it is the whole strategy inverted, and it is what a real race
+ * showed - the player pitted from the lead, a rival that never came in stayed
+ * out and won. The same hole exists at Yoyleland under every model, because a
+ * superspeedway is flat out and never asks the tyres for a corner.
+ *
+ * So worn tyres also cost top speed, in `Car.step`'s rev limiter, where every
+ * model shares one line and no handling model has to change. A dead set is
+ * `TYRE_PACE` of the pace, fading in smoothly with wear - so it is still true
+ * that worn tyres only ever make a car *slower*, never harder to drive.
+ */
+const TYRE_PACE = 0.85;
+
+export function tyreSpeed(car) {
+  const t = car.tyre === undefined ? 1 : car.tyre;
+  return TYRE_PACE + (1 - TYRE_PACE) * t;
+}
+
 function gripLimit(v, bank, assist = 1) {
   const mu = (MU_MECH + MU_AERO * (v / V_AERO) ** 2) * assist;
   // Standard banked-corner limit. It genuinely goes to infinity once

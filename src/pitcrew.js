@@ -23,7 +23,13 @@ const SPEED = 3.2;              // m/s, Guido's trundle
 const TURN = 6.0;               // rad/s he can swing round
 const PAUSE = 0.45;             // seconds spent at each wheel
 const REACH = 0.4;              // how close to a waypoint counts as arrived
-const STANDOFF = 0.85;          // metres clear of the bodywork he works from
+// Metres clear of the bodywork he works from - on top of his own radius, so
+// this is the gap you actually see. Kept small on purpose: he is changing a
+// wheel, and standing back far enough to be obviously safe read as him doing
+// the job from the next parking space. It cannot go to zero, because the ring
+// is built on his worst-case radius and the clearance test measures his
+// footprint against the same rectangle.
+const STANDOFF = 0.30;
 
 const UP = new THREE.Vector3(0, 1, 0);
 

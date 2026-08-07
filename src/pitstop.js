@@ -33,6 +33,10 @@ const LANE_HOLD = 1.4;          // how hard a car in the pits holds its lane
 // enough to cross the lane while still rolling - steering needs speed - and
 // short enough that it is not driving over anybody else's box to get there.
 const PEEL = 26;
+// How far either side of the nominal exit to look for the place the pit road
+// and the racing line overlap. Generous: it is a one-off search at a handover,
+// and the taper is most of a hundred metres long.
+const REJOIN_REACH = 140;
 
 /** How long the crew take, per difficulty. Easy is fastest - see below. */
 export const SERVICE_TIME = { easy: 3.0, normal: 5.5, hard: 8.0 };
@@ -45,6 +49,10 @@ export class PitLane {
   constructor(track, data) {
     this.track = track;
     this.road = new PitRoad(data);
+    // Measure the ribbon against the circuit once, so a car in the pits is
+    // ranked by where it actually is rather than by how far down the lane it
+    // has got. See PitRoad.lapAt.
+    this.road.mapOnto(track);
     // How much of the lap the pit entrance covers.
     //
     // Half the run to the first box, expressed in lap metres. A pit entry is
@@ -55,6 +63,8 @@ export class PitLane {
     const firstBox = this.road.boxes.length
       ? Math.min(...this.road.boxes.map((b) => b.d)) : this.road.length * 0.3;
     this.entryWindow = this.road.lapSpan * (firstBox * 0.5) / this.road.length;
+    this.lastBox = this.road.boxes.length
+      ? Math.max(...this.road.boxes.map((b) => b.d)) : this.road.length * 0.7;
     this.crew = null;             // Guido, if the models are loaded
     this.rig = null;              // Mack, parked
   }
@@ -84,14 +94,27 @@ export class PitLane {
     const inside = this.track.limit(st, -1);
     if (car.n > inside + ENTRY_REACH) return false;
 
-    // Hand over at the matching point on the other ribbon. The two overlap
-    // here, so nothing jumps - see Car.useRoad. The offset is measured
-    // *forwards from the entry*, never as a difference of raw `s` values: the
-    // pit road crosses the start/finish.
-    const dist = this.road.distAt(this.track.delta(this.road.entryS, car.s));
-    const pst = this.road.sample(dist, {});
-    const want = this.laneFor({ s: dist });
-    car.useRoad(this.road, dist, want);
+    // Hand over at the car's *own place* on the other ribbon, not at the
+    // proportionally equivalent distance down it.
+    //
+    // The two are not the same thing: the pit road is a chord and the lap is
+    // an arc, so inside the taper the same fraction of each is tens of metres
+    // apart on the ground. Handing over by proportion put a rival 46 m from
+    // where it had been, in one frame, at Yoyleland. `project` asks where the
+    // car actually is. The offset hint is measured *forwards from the entry*,
+    // never as a difference of raw `s` values: the pit road crosses the
+    // start/finish.
+    const hint = this.road.distAt(this.track.delta(this.road.entryS, car.s));
+    const hit = this.road.project(car.position.x, car.position.z, hint);
+    if (!hit) return false;
+    // Only where the ribbons really do overlap. Off the end of that, the
+    // handover would be a jump however it was computed, so refuse and let the
+    // car come round again.
+    const pst = this.road.sample(hit.s, {});
+    if (hit.n < this.road.limit(pst, -1) - ENTRY_REACH ||
+        hit.n > this.road.limit(pst, 1) + ENTRY_REACH) return false;
+    const n = THREE.MathUtils.clamp(hit.n, this.road.limit(pst, -1), this.road.limit(pst, 1));
+    car.useRoad(this.road, hit.s, n);
     car.pit = Pit.IN;
     car.pitTimer = 0;
     return true;
@@ -121,18 +144,45 @@ export class PitLane {
   }
 
   /**
-   * Put the car back on the circuit at the end of the pit road.
+   * Where this car would rejoin the circuit, or null if it cannot yet.
+   *
+   * The exit taper runs back onto the racing line, so towards its end the two
+   * ribbons overlap and a car can simply be handed across at the place it
+   * already occupies. Before that it is still out on the infield. Asking the
+   * geometry rather than assuming "the end of the ribbon is the merge" also
+   * covers Yoyleland, where the circuit's own corridor pinches at the last
+   * station and the ribbon ends four metres outside it.
+   */
+  rejoinAt(car) {
+    const hit = this.track.project(car.position.x, car.position.z,
+      this.track.wrap(this.road.exitS), REJOIN_REACH);
+    if (!hit) return null;
+    const st = this.track.sample(hit.s, {});
+    if (hit.n < this.track.limit(st, -1) || hit.n > this.track.limit(st, 1)) return null;
+    return hit;
+  }
+
+  /**
+   * Put the car back on the circuit.
    *
    * `pitDone` is the lap on which it rejoined. A car exits onto the inside
    * lane - which is exactly the place `tryEnter` is watching for - so without
    * it the player came straight back in, ten times in a twelve-lap race.
    * One stop per lap is the rule, and it is the real one too.
    */
-  leave(car) {
-    const lapS = this.track.wrap(this.road.exitS);
+  leave(car, at = null) {
+    const hit = at || this.rejoinAt(car);
+    const lapS = hit ? hit.s : this.track.wrap(this.road.exitS);
     const st = this.track.sample(lapS, {});
-    const inside = this.track.limit(st, -1) + 1.2;
-    car.useRoad(this.track, lapS, inside);
+    const n = hit === null ? this.track.limit(st, -1) + 1.2
+      : THREE.MathUtils.clamp(hit.n, this.track.limit(st, -1), this.track.limit(st, 1));
+    car.useRoad(this.track, lapS, n);
+    // Progress is *mapped* through a stop rather than accumulated, so by the
+    // time a car comes back it can be a metre or two out. Re-anchor it to
+    // where the car has actually ended up: the running order is the one thing
+    // a pit stop must never quietly change, and a place decided by a metre
+    // nobody drove is exactly the finish that looks broken from the cockpit.
+    car.progress += this.track.delta(this.track.wrap(car.progress), lapS);
     car.pit = Pit.OUT;
     car.pitTimer = 0;
     car.pitDone = car.lap;
@@ -221,7 +271,12 @@ export class PitLane {
     const target = this.road.speedLimit;
     car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.4, 0, 1);
     car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.2, 0, 1);
-    if (car.s >= this.road.length - 1) this.leave(car);
+    // Rejoin the moment the taper has actually merged, rather than at the last
+    // station regardless. Gated past the boxes so a car cannot be handed back
+    // somewhere the two ribbons happen to pass close on the way in.
+    const at = car.s > this.lastBox + 20 ? this.rejoinAt(car) : null;
+    if (at) this.leave(car, at);
+    else if (car.s >= this.road.length - 1) this.leave(car);
     return true;
   }
 

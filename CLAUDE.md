@@ -118,7 +118,10 @@ corner. `check_steering` is the test that matters: full lock for 1.2 s at
 - **Known, and not yet solved: Pro's AI is slower than Sport's** - about 127 s
   against 111 s over three laps at Motor Speedway - so a throttle-pinned car
   beats it. The model is stable and driveable, which is what it was rewritten
-  for; the pace is a separate tuning job.
+  for; the pace is a separate tuning job. It got a little worse when the
+  grudge was made to last, and for a reason worth knowing: under Pro a lane
+  change is *charged*, in scrub, so a field that races harder laps slower.
+  A throttle-pinned player now wins Pro Hard on all three circuits.
 
 **Pro has `assisted: false`, and that is load-bearing.** No corner braking, no
 lane holding, no automatic overtake, a fixed-ratio steering rack and no
@@ -220,6 +223,21 @@ will move to cover the inside line before you commit. Both are per-difficulty.
   field and they all quietly gave up and you cruised to the flag unopposed.
   Being ahead of them is what switches it off, so passing everybody switches
   everybody on.
+- **... and "close enough to be worth chasing" is half a lap, not a number of
+  metres.** This was raised twice for the same reason - 60 m, then 240 m - and
+  both times a player who got clear simply drove out of range and the whole
+  field relaxed. At Motor Speedway 240 m is a tenth of a lap, so on Hard the
+  owner could pass everybody, pull away, and never see them again: `check_racing`
+  reported *one duel in five laps* there while every other circuit looked fine.
+  `FIGHT_FORGET` is now a fraction of `lapLength`, and the cap only exists so a
+  car being lapped does not chase the leader in its mirrors.
+- **A car that has completed its move is not stuck behind anybody.** The lift
+  that stops a rival driving through the back of the car in front used the same
+  3.6 m window that spots traffic, and a move aims 3.4 m to the side - so a
+  driver that had pulled fully alongside still counted the other car as being
+  in front of it and went on lifting to 92% of its speed. It could draw level
+  every lap and never get by. `SAME_LANE` is the narrower window: seeing
+  somebody is not the same as being behind them.
 - **The floor belongs to the decay, not the rise.** `if (fight < 0.01) fight = 0`
   applied to a value winding *up* eats the first increment of every step -
   which is smaller than the floor - and the grudge never leaves zero. It cost
@@ -373,9 +391,43 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   the pit lane a shortcut. `lapAt` maps distance along the ribbon onto the
   stretch of lap it replaces, which makes the two paths worth exactly the same
   and leaves the cost where it belongs: the speed limit and the stop.
-- **Entry and exit are handovers, not teleports.** The ribbon's ends taper
-  onto the racing line, so the two overlap in space wherever a handover is
-  allowed; `check_pits` asserts that overlap is under a car's length.
+- **... and the map is *measured*, not shared out in proportion.** `mapOnto`
+  projects every station onto the circuit once, at load, and `lapAt`
+  interpolates that. In proportion the two disagree by several metres inside
+  the tapers, which puts a car's place in the race a few metres from where the
+  car can be seen to be - so a rival could be passed on the road and still be
+  ahead on the timing screen. The table is forced to increase (a station
+  projecting behind its neighbour would show as a car going backwards) and
+  rescaled to span exactly `lapSpan`, which is what keeps the lane worth
+  neither more nor less than the arc. `check_pits` asserts the two agree to
+  within a metre for every car, all race.
+- **Entry and exit are handovers, not teleports - so ask the geometry where
+  the car is.** The ribbon's ends taper onto the racing line, so the two
+  overlap in space wherever a handover is allowed; `check_pits` asserts that
+  overlap is under a car's length. What it does *not* give you is a
+  correspondence between the two distance coordinates: a chord and an arc at
+  the same fraction of their length are tens of metres apart on the ground.
+  Handing over by proportion moved a rival **46 m in one frame** at
+  Yoyleland's entry, and dropped every car 5 m sideways at the exit.
+  `Track.project` finds the station the car is actually at; `rejoinAt` waits
+  for the first place the projection lands inside the circuit's own corridor,
+  which also covers Yoyleland, where that corridor pinches at the very last
+  station of the ribbon.
+- **`psi` is measured from *this* ribbon's tangent, so carrying the number
+  across turns the car on the spot.** The two meet at 4 degrees at Motor
+  Speedway and 20 at Yoyleland, and 20 degrees in one frame at pit-exit speed
+  is exactly the shake the owner reported on rejoining. `Car.useRoad` converts
+  it, preserving the *world* heading - the car rejoins pointing across the
+  road, which is what a pit exit looks like, and steers straight. The guest
+  applies the host's `psi` **after** the handover for the same reason, or it
+  is turned twice.
+- **A car has to start moving over long before the entrance.** `laneSteer`
+  asks for a crossing *rate*, and at Yoyleland the pit entry is thirteen
+  metres in from the racing line - four and a half seconds of crossing, 320 m
+  at racing speed. Aiming only once inside the entry window had four of six
+  rivals arrive still out on the line, unable to turn in, driving the last
+  laps of a race on dead tyres wanting a stop they could never take.
+  `PIT_APPROACH` is that distance and it is sized by the widest circuit.
 - **Anything measured forward of the entry must use `track.delta`.** These pit
   roads run *through* the start/finish - Yoyleland's enters at s = 2394 of a
   2817 m lap - so subtracting raw `s` values goes negative the moment the car
@@ -441,10 +493,21 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   never gets near it, but the entry taper sweeps across the infield in a short
   distance and there a car three metres off the ribbon advanced *five metres
   of lap in one 1/120 s step*.
-- **Worn tyres only lose grip**, fading to `0.75` through the same multiplier
-  as `car.assist` so it reaches all three models through the one function they
+- **Worn tyres lose grip**, fading to `0.75` through the same multiplier as
+  `car.assist` so it reaches all three models through the one function they
   share and can introduce no discontinuity. Under Arcade the car still cannot
   spin: a five-year-old on worn tyres is slower and never in trouble.
+- **... and grip alone is not a cost, because grip is not what sets the pace
+  here.** Arcade has no tyre forces in it at all, so `tyreGrip` reaches
+  *nothing* under the default model and a dead set cost exactly zero - which
+  makes a stop pure loss and hands the race to whoever skips it. That is the
+  whole strategy inverted, and it is what the owner hit: they pitted from the
+  lead, Mater never came in, Mater won. The same hole exists at Yoyleland
+  under every model, because a superspeedway never asks the tyres for a
+  corner. So worn tyres also cost top speed - `tyreSpeed`, applied in
+  `Car.step`'s rev limiter, which every model already shares, so no handling
+  model changes and the rule still reads "worn tyres only ever make a car
+  slower".
 - **Wear is linear in lateral load, not squared.** Squared is more realistic
   and far too sharp - at 2.5 g it wears seven times as fast as cruising, and a
   player at the limit burned a set every other lap. Calibration today: 5 laps
@@ -468,7 +531,9 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   at every corner of the route - which is what it looked like, and why a
   clearance test written against his centre passed while he was visibly
   clipping. The ring is offset by the standoff **plus his own radius**, and
-  the test measures against his footprint.
+  the test measures against his footprint. That is also why `STANDOFF` is only
+  0.30 m: it is the gap you *see*, on top of a radius that is already there,
+  and at 0.85 he looked like he was doing the job from the next parking space.
 - **Guido drives round a ring, not from wheel to wheel.** Straight lines
   between corners go through the car. The route is built on a rectangle
   enclosing the bodywork: every waypoint sits on its perimeter, every move
@@ -814,8 +879,9 @@ What "good" looks like right now:
 
 - `simulate.mjs all` — 30 OK: every handling model x circuit x difficulty,
   plus a two-player grid on each circuit. Easy is P1 on all nine
-  model x circuit combinations. Hard beats a throttle-pinned player on eight of
-  nine; Pro on Motor Speedway is the exception and wants a look.
+  model x circuit combinations. Hard beats a throttle-pinned player on six of
+  nine - every Arcade and Sport circuit; Pro is the exception on all three,
+  which is the known pace gap below rather than a new fault.
   If Easy stops being a win, that is a regression regardless of what else
   improved. Worst heading seen anywhere is 81° with every car still finishing;
   the run asserts nothing exceeds 172°, which is where `maxPsi` would be
@@ -834,8 +900,13 @@ What "good" looks like right now:
   every difficulty an identical six passes and hid the thing being measured.
   Passes alone are ambiguous too: zero means both "dominant, nobody left to
   pass" and "cannot get by". The conversion rate separates them. Today:
-  Normal converts 78–88% with nobody taking a place back; Hard converts 10–38%
-  from three to five times as many duels and takes 5–8 places back. The shape
+  under Arcade, Normal converts 47% with nobody taking a place back and Hard
+  converts 26% from four times as many duels while giving 13 places back.
+  **Read it per circuit as well as in total.** The totals looked perfectly
+  healthy for a release in which Motor Speedway on Hard produced *one duel in
+  five laps* - the player pulled clear, went out of `FIGHT_FORGET` range, and
+  nobody ever came back at them, which is exactly what the owner reported.
+  That circuit alone is now 26 duels and 5 places lost. The shape
   is only asserted for the models with a driver aid: Pro has none, so the
   "player" there is a scripted driver whose own quality would dominate the
   numbers, and all that is required of it is that the field is reachable.
@@ -856,7 +927,13 @@ What "good" looks like right now:
   nothing across the lane at bumper height, the ribbon within 15 cm of the
   surface, entry and exit overlapping the racing line — then a whole race, in
   which the player drives in, is frozen for the service, stays under the limit
-  at the boxes, gains no progress at either handover, and every car stops.
+  at the boxes, gains no progress at either handover, and every car stops -
+  7 of 7 on all three circuits, which is the number that matters, because a
+  rival that *cannot* reach the entrance stays out on dead tyres and beats
+  everybody who did it properly. It also asserts the two things a stop must
+  never disturb: that no handover moves a car more than a car's length or
+  turns it more than 20 degrees, and that every car's `progress` stays within
+  a metre of where it actually is on the road.
 - `check_grid.mjs` — every slot on the racing surface: `Material.105` on Motor
   Speedway, `Material.227` on Palm Mile, `Asphalt` on Yoyleland. Anything else
   and somebody is starting in the pits - `Material.107` in particular *is* the

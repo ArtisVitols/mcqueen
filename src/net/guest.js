@@ -67,7 +67,7 @@ export class GuestView {
     // because the car is braking to a mark and then held still by the crew.
     if (truth.onPit || car.onPit) {
       Object.assign(car, {
-        n: truth.n, psi: truth.psi, speed: truth.speed, tyre: truth.tyre,
+        n: truth.n, speed: truth.speed, tyre: truth.tyre,
         progress: truth.progress, lap: truth.lap, place: truth.place,
         finished: truth.finished,
       });
@@ -78,6 +78,12 @@ export class GuestView {
       } else {
         car.s = truth.s;
       }
+      // The heading goes on *after* the handover, never before. `useRoad`
+      // rotates `psi` out of one ribbon's frame and into the other's, to keep
+      // the car pointing the way it was pointing - and the number on the wire
+      // is already in the frame it is being sent for, so applying it first
+      // would have it turned twice.
+      car.psi = truth.psi;
       car.onPit = truth.onPit;
       car.sync();
       this.error = null;

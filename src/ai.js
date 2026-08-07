@@ -15,6 +15,7 @@ const SIDE_CLEAR = 3.6;     // lateral gap that counts as "occupied"
 const DRAFT_RANGE = 34;
 const CAR_LENGTH = 5;
 const PASS_GAP = 3.4;       // how far beside the car being passed to aim
+const SAME_LANE = 2.4;      // ... and how close is still *behind* them
 
 // Chasing a human. `fight` is 0..1 and it is *on while a human is ahead of
 // this car*: it winds up over a second and a half, and while it is up the
@@ -24,10 +25,18 @@ const PASS_GAP = 3.4;       // how far beside the car being passed to aim
 //
 // Race.rubberBand remains the global "keep the pack catchable" control; these
 // two do different jobs and the band stands down for a car that is chasing.
-// How far ahead a human can be and still be worth chasing. Generous, because
-// the point is that they *do* catch you: at 60 m a leader simply drove out of
-// range and everybody relaxed.
-const FIGHT_FORGET = 240;
+// How far ahead a human can be and still be worth chasing, as a fraction of a
+// lap.
+//
+// It has been raised twice, and for the same reason both times: a fixed 60 m,
+// then a fixed 240 m, and in both cases a player who got clear simply drove
+// out of range and the entire field relaxed and let them go - which is the
+// one thing this is supposed to prevent. Half a lap is not a tuning value, it
+// is the point past which "ahead of me" stops meaning anything at all, so
+// this now says what it always meant: **chase while a human is ahead of you.**
+// The cap is only there to stop a car that is being lapped from chasing the
+// leader it can see in its mirrors.
+const FIGHT_FORGET = 0.45;      // of a lap
 const FIGHT_RISE = 1.5;     // seconds to wind up to full chase
 // Seconds for the grudge to halve. Per-difficulty, because how long a rival
 // stays angry is as much of a dial as how fast it goes when it is: a short
@@ -79,12 +88,13 @@ export class Driver {
     let chasing = false;
     let nearest = Infinity;
 
+    const forget = car.track.lapLength * FIGHT_FORGET;
     for (const other of field) {
       if (!other.isPlayer || other.finished) continue;
       const gap = other.progress - car.progress;      // positive: they are ahead
       if (Math.abs(gap) < nearest) nearest = Math.abs(gap);
-      // Behind them, and close enough that catching up is a real prospect.
-      if (gap > 0 && gap < FIGHT_FORGET) chasing = true;
+      // Behind them, and on the same lap as them.
+      if (gap > 0 && gap < forget) chasing = true;
     }
 
     // The whole rule, and it is deliberately this simple: **chase while a
@@ -96,7 +106,7 @@ export class Driver {
     // shape the owner asked for: pass the lot, they come after you; one of
     // them gets by, that one settles down.
     const ceiling = tuning.fight ?? 0;
-    if (chasing && nearest < FIGHT_FORGET) {
+    if (chasing && nearest < forget) {
       this.fight += (ceiling - this.fight) * Math.min(1, dt / FIGHT_RISE);
     } else {
       this.fight *= Math.pow(0.5, dt / (tuning.grudge ?? FIGHT_HALFLIFE));
@@ -238,8 +248,16 @@ export class Driver {
     if (ahead && aheadGap < DRAFT_RANGE && Math.abs(ahead.n - car.n) < 2.5) {
       targetSpeed *= 1 + (0.07 + FIGHT_TOW * this.fight) * (1 - aheadGap / DRAFT_RANGE);
     }
-    // Do not drive through the back of the car in front.
-    if (ahead && aheadGap < 11) {
+    // Do not drive through the back of the car in front - but only while
+    // actually behind it.
+    //
+    // `SIDE_CLEAR` is 3.6 m and a move aims `PASS_GAP` 3.4 m to the side, so a
+    // driver that had *completed* its move and was running alongside still
+    // counted the other car as being in front of it, and went on lifting to
+    // 92% of its speed. It could draw level and never get by, all race. The
+    // lane here is deliberately narrower than the one that spots traffic:
+    // seeing somebody is not the same as being stuck behind them.
+    if (ahead && aheadGap < 11 && Math.abs(ahead.n - car.n) < SAME_LANE) {
       targetSpeed = Math.min(targetSpeed, ahead.speed * (0.85 + 0.015 * aheadGap));
     }
     // A touch of lift through the banking. Kept small on purpose: under the

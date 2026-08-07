@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PHYSICS } from './physics.js';
+import { PHYSICS, tyreSpeed } from './physics.js';
 
 /**
  * A car in track space.
@@ -104,6 +104,23 @@ export class Car {
    * happens inside that overlap.
    */
   useRoad(road, s, n) {
+    // Keep the car pointing where it was actually pointing.
+    //
+    // `psi` is measured from the tangent of whichever ribbon the car is on,
+    // and the two meet at an angle - 4 degrees at Motor Speedway, 20 at
+    // Yoyleland. Carrying the number across therefore rotates the car on the
+    // spot by exactly that angle, in one frame, at pit-exit speed. Preserve
+    // the *world* heading instead and the handover is invisible; the car
+    // rejoins pointing across the road, which is what a pit exit looks like,
+    // and steers straight.
+    const was = this.road.sample(this.s, {});
+    const now = road.sample(s, {});
+    const turn = Math.atan2(was.tz, was.tx) - Math.atan2(now.tz, now.tx);
+    this.psi = wrapAngle(this.psi + turn);
+    // Anything low-passing the heading sees this as a step otherwise, and
+    // reports a yaw rate of hundreds of degrees a second that never happened.
+    this.psiPrev = this.psi;
+    this.psiRate = 0;
     this.road = road;
     this.s = s;
     this.n = n;
@@ -124,8 +141,13 @@ export class Car {
     // Shared invariants. Keeping these here rather than in the models is what
     // stops a handling change from becoming a lap-counting bug.
     this.psi = THREE.MathUtils.clamp(this.psi, -this.physics.maxPsi, this.physics.maxPsi);
-    if (this.speed > this.topSpeed) {
-      this.speed += (this.topSpeed - this.speed) * Math.min(1, dt * 3);
+    // The rev limiter, and with it what worn tyres cost in a straight line.
+    // Here rather than in a model because every model shares this line, and
+    // because the model that most needs it - Arcade - has no tyres in it at
+    // all. See tyreSpeed.
+    const top = this.topSpeed * tyreSpeed(this);
+    if (this.speed > top) {
+      this.speed += (top - this.speed) * Math.min(1, dt * 3);
     }
 
     // --- integrate in track space ----------------------------------------
@@ -215,4 +237,10 @@ export class Car {
   get speedKmh() {
     return this.speed * 3.6;
   }
+}
+
+/** Into (-pi, pi]. */
+function wrapAngle(a) {
+  const TAU = Math.PI * 2;
+  return a - TAU * Math.round(a / TAU);
 }

@@ -31,7 +31,17 @@ const AI_PIT_AT = 0.28;
 // A car aiming for the pits has one taper to cross the road in, which is
 // less time than an overtake - so it uses the committed gain, exactly as a
 // move does. The ordinary one abandons the entry half-finished.
-const PIT_AIM_CLOSE = 2.2;
+const PIT_AIM_CLOSE = 3.0;
+// How far before the pit entrance a car that has decided to stop starts
+// moving down to the inside.
+//
+// Sized by the widest circuit, not the tidiest number: `laneSteer` asks for a
+// crossing *rate*, and at Yoyleland the entrance is thirteen metres in from
+// the racing line, so at 3 m/s that is four and a half seconds - 320 m at
+// racing speed. At 150 m four of the six rivals arrived at the entry still
+// out on the line, could not turn in, and drove the last four laps of a race
+// on dead tyres wanting a stop they could never take.
+const PIT_APPROACH = 320;
 
 export const State = {
   COUNTDOWN: 'countdown',
@@ -366,7 +376,17 @@ export class Race {
    * for the pits moves like a car and not like a magnet.
    */
   aimForPits(car, dt) {
-    if (!this.pits || !this.pits.canEnter(car)) return;
+    if (!this.pits || car.pit !== Pit.OUT || car.finished) return;
+    // From well *before* the entrance, not only once inside the window.
+    //
+    // The two ribbons only overlap for the first few metres of the taper - by
+    // twenty metres in, the pit road is already eight metres off the racing
+    // line - so a car that starts moving over when it reaches the entry is
+    // still out on the racing line when the only place it could have crossed
+    // has gone by. It then sails past every lap, which is how a race ended
+    // with one car pitting and six driving round on dead tyres.
+    const d = this.track.delta(this.pits.road.entryS, car.s);
+    if (d < -PIT_APPROACH || d > this.pits.entryWindow) return;
     const st = this.track.sample(car.s, car.st);
     car.steer = laneSteer(car, this.track.limit(st, -1) + 0.6, dt, PIT_AIM_CLOSE);
   }

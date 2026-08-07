@@ -213,9 +213,31 @@ for (const spec of todo) {
   const firstBox = Math.min(...data.pit.boxes.map((b) => b.d));
   let progressJump = 0;
   let lastProgress = player.progress;
+  let orderErr = 0;
+  // The handover itself, measured on the ground. Changing ribbon is a change
+  // of *coordinates*, and it used to be a change of place: the car was moved
+  // to the proportionally equivalent distance down the other road and pointed
+  // along its tangent, which at the pit exit is 20 degrees from the racing
+  // line. That is what the shake on rejoining was.
+  const wasRoad = new Map(), wasPos = new Map(), wasHead = new Map();
+  const heading = (c) => {
+    const st = c.road.sample(c.s, {});
+    return Math.atan2(st.tz, st.tx) + c.psi;
+  };
+  let worstJump = 0, worstTurn = 0;
   while (race.state !== State.FINISHED && t < 1500) {
+    for (const c of race.field) {
+      wasRoad.set(c, c.road); wasPos.set(c, c.position.clone()); wasHead.set(c, heading(c));
+    }
     race.update(DT, AIM_LEFT);
     t += DT;
+    for (const c of race.field) {
+      if (wasRoad.get(c) === c.road) continue;
+      worstJump = Math.max(worstJump, c.position.distanceTo(wasPos.get(c)));
+      let turn = heading(c) - wasHead.get(c);
+      turn -= Math.PI * 2 * Math.round(turn / (Math.PI * 2));
+      worstTurn = Math.max(worstTurn, Math.abs(turn));
+    }
     // Measured across the *field*, not the player. The scripted driver here
     // steers hard left all race, so now that a person may pit whenever they
     // like it comes in every lap and its tyres never get low - which would
@@ -257,6 +279,17 @@ for (const spec of todo) {
     const step = Math.abs(player.progress - lastProgress);
     if (step > 3) progressJump = Math.max(progressJump, step);
     lastProgress = player.progress;
+    // ... and it must still describe where the car *is*. `progress` is the
+    // running order and the finish line; `s` is where you can see the car.
+    // A stop used to leave the two several metres apart, because the pit road
+    // paid out lap metres in proportion to its own length rather than by where
+    // each station really sat on the lap - so a rival could be passed on the
+    // road and still be ahead on the timing screen, which is precisely the
+    // finish that reads as broken from the cockpit.
+    for (const c of race.field) {
+      if (c.onPit || c.finished) continue;
+      orderErr = Math.max(orderErr, Math.abs(track.delta(track.wrap(c.progress), c.s)));
+    }
   }
 
   console.log(`\n  ${spec.short}`);
@@ -286,6 +319,14 @@ for (const spec of todo) {
   progressJump === 0
     ? ok('progress never jumped at a handover - the pit lane is not a shortcut')
     : fail(`progress jumped ${progressJump.toFixed(1)} m changing ribbon`);
+  worstJump < 3 && worstTurn < 0.35
+    ? ok(`the handovers are smooth (worst ${worstJump.toFixed(2)} m, ` +
+         `${(worstTurn * 180 / Math.PI).toFixed(1)} deg)`)
+    : fail(`a car jumped ${worstJump.toFixed(1)} m / ` +
+           `${(worstTurn * 180 / Math.PI).toFixed(0)} deg changing ribbon`);
+  orderErr < 1
+    ? ok(`the running order matches the road (worst ${orderErr.toFixed(2)} m)`)
+    : fail(`a car's progress was ${orderErr.toFixed(1)} m from where it actually was`);
   const stops = race.field.filter((c) => c.pitStops > 0).length;
   stops >= 2 ? ok(`${stops} of ${race.field.length} cars stopped - the AI pits too`)
              : fail(`only ${stops} car(s) stopped; rivals are not pitting`);

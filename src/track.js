@@ -84,6 +84,49 @@ export class Track {
     return [i, (i + 1) % this.count, f - Math.floor(f)];
   }
 
+  /** Station `i`, wrapped round the lap. A ribbon with ends says -1 instead. */
+  idx(i) {
+    return ((i % this.count) + this.count) % this.count;
+  }
+
+  /**
+   * Where a world point sits on this ribbon, as `{s, n}` - or null if it is
+   * nowhere near it.
+   *
+   * This is how a car changes ribbon. The alternative - mapping one ribbon's
+   * distance onto the other's in proportion and picking a lane - is not a
+   * *place*: the pit road is a chord and the lap is an arc, so proportional
+   * distance is off by tens of metres inside the tapers, and a car handed over
+   * that way teleports. It was 46 m at Yoyleland's entry and 5 m sideways at
+   * every exit, which is what the shake on rejoining the circuit was.
+   *
+   * Searched near a hint rather than over the whole ribbon, because a chord
+   * across an oval passes close to two quite different parts of the lap.
+   */
+  project(x, z, hintS, reach = 120) {
+    const d = this.data;
+    const half = Math.ceil(reach / this.step);
+    const i0 = Math.round(this.wrap(hintS) / this.step);
+    let bi = -1;
+    let best = Infinity;
+    for (let k = -half; k <= half; k++) {
+      const i = this.idx(i0 + k);
+      if (i < 0) continue;
+      const dx = x - d.x[i], dz = z - d.z[i];
+      const q = dx * dx + dz * dz;
+      if (q < best) { best = q; bi = i; }
+    }
+    if (bi < 0) return null;
+    // The stations are a metre or two apart, so the foot of the perpendicular
+    // is within half a step of the nearest one and this one linear step lands
+    // on it.
+    const dx = x - d.x[bi], dz = z - d.z[bi];
+    return {
+      s: this.wrap(bi * this.step + dx * d.tx[bi] + dz * d.tz[bi]),
+      n: dx * d.ox[bi] + dz * d.oz[bi],
+    };
+  }
+
   sample(s, out = {}) {
     const d = this.data;
     const [i, j, t] = this.span(s);

@@ -1,3 +1,4 @@
+import { Vector3 } from 'three';
 import { Track } from './track.js';
 
 /**
@@ -48,11 +49,17 @@ export class PitRoad extends Track {
     this.lapSpan = data.lapSpan;      // lap metres between them, forwards
     this.speedLimit = data.speedLimit;
     this.boxes = data.boxes || [];
+    this.lapMap = null;               // filled by mapOnto, see lapAt
   }
 
   /** A pit road has ends. */
   wrap(d) {
     return d < 0 ? 0 : d > this.length ? this.length : d;
+  }
+
+  /** No station is "one past the end": a pit road does not come round again. */
+  idx(i) {
+    return i < 0 || i >= this.count ? -1 : i;
   }
 
   /** Stations either side of `d`, never blending past the last one. */
@@ -68,9 +75,49 @@ export class PitRoad extends Track {
    *
    * Not its own length: the chord is shorter than the arc, and paying it out
    * as lap progress would hand a place to anybody who pitted.
+   *
+   * With `mapOnto` run, this is *measured* - each station's real place on the
+   * lap - rather than shared out in proportion. Both cost the same lap metres
+   * end to end, so neither is a shortcut, but only the measured one agrees
+   * with where the car can be seen to be, and the running order is drawn from
+   * exactly this number.
    */
   lapAt(d) {
-    return this.entryS + (this.wrap(d) / this.length) * this.lapSpan;
+    if (!this.lapMap) return this.entryS + (this.wrap(d) / this.length) * this.lapSpan;
+    const [i, j, t] = this.span(d);
+    return this.entryS + this.lapMap[i] * (1 - t) + this.lapMap[j] * t;
+  }
+
+  /**
+   * Measure each station against the circuit, once, at load.
+   *
+   * Forced to increase, because the running order reads this and a station
+   * that projects a metre behind its neighbour would show as a car going
+   * backwards; and rescaled to span exactly `lapSpan`, because the pit road
+   * has to be worth precisely the stretch of lap it replaces - that is the
+   * property that stops it being either a shortcut or a penalty in its own
+   * right, on top of the limit and the stop.
+   */
+  mapOnto(track) {
+    const lap = new Float64Array(this.count);
+    const p = new Vector3();
+    const st = {};
+    let hint = this.entryS;
+    let run = -Infinity;
+    for (let i = 0; i < this.count; i++) {
+      this.sample(i * this.step, st);
+      this.position(st, 0, p);
+      const hit = track.project(p.x, p.z, hint, 260);
+      if (hit) hint = hit.s;
+      run = Math.max(run, track.delta(this.entryS, hint));
+      lap[i] = run;
+    }
+    const span = lap[this.count - 1] - lap[0];
+    if (!(span > 1)) return;                 // nothing sensible measured
+    for (let i = 0; i < this.count; i++) {
+      lap[i] = (lap[i] - lap[0]) * this.lapSpan / span;
+    }
+    this.lapMap = lap;
   }
 
   /**
