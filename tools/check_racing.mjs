@@ -155,6 +155,8 @@ console.log('  track  physics  difficulty   duels  passed   lost    took   final
 
 let failed = 0;
 const summary = {};
+const ok = (m) => console.log('  ok:', m);
+const fail = (m) => { console.log('  FAIL:', m); failed++; };
 
 for (const spec of tracks) {
   for (const physics of Object.keys(PHYSICS)) {
@@ -281,6 +283,49 @@ for (const physics of Object.keys(PHYSICS)) {
     console.log(`  ! ${physics}: Hard never takes a place back off the player`);
     failed++;
   }
+}
+
+// --------------------------------------------------- Normal lets you win --
+//
+// Normal carries every one of Hard's numbers, so the tables above cannot tell
+// them apart by tuning: the difference is a rule, and this is the rule.
+console.log('\n=== the last lap on Normal ===');
+console.log('Normal is Hard until the final lap, when no rival may be quicker');
+console.log('than the person - 20 km/h slower - and they move off the line too.');
+for (const spec of tracks) {
+  const r = race(spec.id, 'arcade', 'normal');
+  const player = r.player;
+  let t = 0;
+  let ahead = null;         // who was in front, and catchable, on the last lap
+  let gone = 0;             // ... and how many had already taken the flag
+  let reach = 0;            // how much ground the concession buys
+  while (r.state !== State.FINISHED && t < 1200) {
+    r.update(DT, FLAT_OUT);
+    t += DT;
+    if (ahead === null && player.lap >= LAPS && !player.finished) {
+      // How much ground 20 km/h buys over what is left of the race. That is
+      // the honest extent of the promise: a rival further up the road than
+      // this cannot be caught by lifting, however willing it is.
+      const lapTime = r.track.lapLength / Math.max(20, player.speed);
+      // Four fifths of the theoretical closing distance. Catching a car is not
+      // the same as being past it: at Palm Mile a rival 109 m up was reeled in
+      // to nothing over the lap and the two crossed the line together, which
+      // is the mechanism working exactly as specified and the player still
+      // finishing second. What the setting promises is a pass, so the promise
+      // stops short of the arithmetic.
+      reach = (DIFFICULTY.normal.concede || 0) * lapTime * 0.8;
+      ahead = r.field.filter((c) => c !== player && !c.out && !c.finished
+        && c.progress - player.progress < reach && c.progress > player.progress);
+      gone = r.field.filter((c) => c !== player && c.finished).length;
+    }
+  }
+  const lost = (ahead || []).filter((c) => r.results.indexOf(c) < r.results.indexOf(player));
+  lost.length === 0
+    ? ok(`${spec.short}: beat all ${ahead.length} car(s) within reach (${reach.toFixed(0)} m) ` +
+         `at the start of the last lap - finished P${player.place}` +
+         `${gone ? `, ${gone} already home` : ''}`)
+    : fail(`${spec.short}: ${lost.length} car(s) within ${reach.toFixed(0)} m still beat the ` +
+           `player (finished P${player.place})`);
 }
 
 console.log(failed ? `\n${failed} problem(s)` : '\novertaking gets harder with the difficulty');

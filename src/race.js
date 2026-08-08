@@ -68,6 +68,9 @@ const CRASH_STOPPED = 1.2;   // m/s that counts as parked
 // How fast contact may push two cars apart, in metres per second. Firm enough
 // to keep a pack from overlapping and slow enough to look like a push.
 const SEPARATE_RATE = 6;
+// A conceding rival never drops below this, however slowly the human is going.
+// A race where the whole field waits for a stopped car is not a race.
+const CONCEDE_FLOOR = 30;    // m/s, about 108 km/h
 
 export const State = {
   COUNTDOWN: 'countdown',
@@ -332,6 +335,7 @@ export class Race {
       }
       if (this.stepPit(car, dt)) continue;
       driver.update(dt, this.field, this.tuning, this.physics);
+      this.concede(car);
       this.maybeCrash(car, dt);
       this.rubberBand(car);
       // Rivals stop too, or a stop is a penalty rather than a strategy - and
@@ -593,6 +597,44 @@ export class Race {
     const t = this.tuning;
     car.baseSpeed = BASE_SPEED * car.paceScale;
     car.topSpeed = BASE_SPEED * Math.max(t.aiSpeed, t.chaseSpeed ?? t.aiSpeed) * car.paceScale;
+  }
+
+  /**
+   * The last lap, on Normal: anybody still ahead of a human lifts.
+   *
+   * `tuning.concede` is metres per second off the pace, and it is what makes
+   * Normal a setting a five-year-old finishes in front however the race has
+   * gone - the rest of Normal is Hard, which is deliberate and is the point.
+   * It comes off the *target* speed rather than the limiter so it reads as a
+   * lift: they keep racing each other, they simply stop driving away from you.
+   *
+   * Ahead of *any* human, so a two-player grid lets both of them through.
+   */
+  concede(car) {
+    car.concedeCap = null;
+    const off = this.tuning.concede;
+    if (!off || car.finished) return;
+    for (const human of this.humans) {
+      // Not while they are in the pits: a car crawling down the pit lane at
+      // 79 km/h would have the whole field crawling with it.
+      if (human.finished || human.onPit) continue;
+      if (human.lap < this.totalLaps) continue;
+      // Everybody, not only whoever happens to be ahead at this instant.
+      //
+      // Capping just the cars in front leaks: a rival that concedes, drops
+      // behind and is no longer "in front" is released, and with Normal
+      // carrying Hard's chase pace it comes straight back past at the flag.
+      // Nine races of it produced six photo finishes lost by hundredths. On
+      // the last lap of a Normal race nobody is quicker than the person, and
+      // that is the setting's whole promise.
+      // Twenty km/h slower **than the person**, not than its own pace. That is
+      // what "so I can pass them" actually requires: measured against its own
+      // pace, a rival that was already quicker than you stays quicker than you
+      // and the lift changes the gap rather than closing it. Measured against
+      // yours, you close at exactly 20 km/h and the last lap comes to you.
+      const cap = Math.max(CONCEDE_FLOOR, human.speed - off);
+      car.concedeCap = car.concedeCap === null ? cap : Math.min(car.concedeCap, cap);
+    }
   }
 
   /** How deep in another car's tow this car is, 0..1. */

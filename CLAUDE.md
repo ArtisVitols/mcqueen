@@ -79,7 +79,16 @@ Consequences to respect:
   straightening torque past ~80°, so a spin always ends pointing forwards.
 - Track limits are a soft clamp plus a speed scrub, never a crash.
 - **The chase camera must be positioned in track space**, not by lerping a
-  world position. Smoothing towards a target moving at 50 m/s leaves the camera
+  world position, **and it has to be told when the ribbon changes.** The
+  anchor is `car.s - back`, and eight metres behind a car at the mouth of the
+  pit lane is a completely different place on the two roads - measured at 12 m
+  turning in and 6 m coming out, in a single frame, while the car itself moved
+  0.8 m. `car.n` changes meaning at the same instant. The car crossing cleanly
+  is not enough; the *view* is what the owner sees. `placeCamera` carries the
+  discontinuity as an offset and decays it with the same frame-rate-independent
+  blend the camera already uses for lane changes, so the handover frame moves
+  the camera by nothing at all and it slides onto the new anchor over the next
+  fraction of a second. `shots_pits` asserts it. Smoothing towards a target moving at 50 m/s leaves the camera
   a fixed `v·τ` behind — about 8 m — which is far enough for rivals to slot in
   between it and the player. `placeCamera` anchors at `car.s - back` and only
   smooths the lateral offset.
@@ -252,6 +261,42 @@ Mack, who are still `"racer": false` - the pit crew and the parked transporter.
   which only the textured render says. At +pi/2 he showed the camera his boot,
   which is exactly how Chick Hicks shipped backwards. `diag_cars.mjs` takes a
   list of car ids now, because eighteen in one frame are too small to read.
+
+## Normal is Hard, and then it lets you win
+
+Every AI number in `DIFFICULTY.normal` is Hard's - aggression, band, fight,
+defend, grudge, both paces. The only difference is a rule: **on the final lap
+no rival may be quicker than the person**, and they move off the line as well.
+That is the owner's specification, and it is why the two settings cannot be
+told apart by reading the tuning table.
+
+- **`lift` is not one of the copied numbers**, because it is not an AI number:
+  it is the corner-braking aid on the *player's* own car. Taking it away too
+  would have made Normal harder to *drive* than Hard under Sport and Pro,
+  which is the opposite of the point.
+- **Twenty km/h slower than the person, not than its own pace.** Measured
+  against its own pace, a rival that was already quicker than you stays
+  quicker than you and the lift changes the gap rather than closing it.
+  Measured against yours, you close at exactly 20 km/h.
+- **Everybody, not only whoever is in front at that instant.** Capping just
+  the cars ahead leaks: one that concedes, drops behind and is no longer
+  "in front" is released, and with Hard's chase pace it comes straight back
+  past at the flag. Nine races of it produced six photo finishes lost by
+  hundredths.
+- **Lifting is not enough on its own - they have to move.** A car that lifts
+  and then sits on the racing line has not let anybody past, it has become a
+  slower obstacle. A conceding rival with a human within `LET_RANGE` behind
+  also steers off the line, away from the side they are on, and stops
+  defending.
+- **The promise has a reach, and it is worth knowing.** Twenty km/h over one
+  lap buys 116 m at Palm Mile and 215 m at Yoyleland; a rival further up the
+  road than that cannot be caught by lifting, and one *exactly* at that
+  distance is caught and not passed - which is a photo finish lost, and is the
+  mechanism working. `check_racing` asserts the player beats everything within
+  four fifths of that distance, and prints where they finished.
+- There is a floor (`CONCEDE_FLOOR`) and the pits are excluded, or a player
+  crawling down the pit lane at 79 km/h would have the whole field crawling
+  with them.
 
 ## Rivals that fight back
 

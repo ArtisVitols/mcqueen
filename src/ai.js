@@ -72,6 +72,12 @@ function paced(tuning, cruise, chase, fight) {
 // where they have already got to: the moment they are alongside this driver
 // concedes the line and races them side by side. That is the difference
 // between hard to pass and cheap to lose to.
+// How far back a human is still worth getting out of the way of, and how far
+// off the line to go. A little over a car's width: enough to be a lane, not so
+// much that a car conceding parks itself in the wall.
+const LET_RANGE = 70;
+const LET_STEP = 3.2;
+
 const DEFEND_RANGE = 15;    // metres behind that counts as a threat
 const DEFEND_STEP = 1.4;    // how far towards the inside the move goes
 const DEFEND_HOLD = 2.5;    // seconds the covered line is held
@@ -192,6 +198,8 @@ export class Driver {
     let blockedOutside = false;
     let chall = null;          // the human closing on us from behind
     let challGap = Infinity;
+    let letBy = null;          // ... and the one we are getting out of the way of
+    let letGap = Infinity;
 
     for (const other of field) {
       if (other === car) continue;
@@ -213,6 +221,14 @@ export class Driver {
         chall = other;
         challGap = -gap;
       }
+      // Anybody human coming up behind, whether or not they are faster - the
+      // concession below has to see them before they are quicker, because it
+      // is the reason they are about to be.
+      if (other.isPlayer && !other.finished && gap < 0 && -gap < LET_RANGE
+          && -gap < letGap) {
+        letBy = other;
+        letGap = -gap;
+      }
     }
 
     // --- choose a lane ----------------------------------------------------
@@ -224,6 +240,22 @@ export class Driver {
     // Concede the moment they are alongside. Holding a line against a car that
     // is already there is not defending, it is driving into them.
     if (chall && challGap < CAR_LENGTH) this.defend = 0;
+
+    // **Letting them by is a lane as well as a lift.**
+    //
+    // On the last lap of a Normal race a rival ahead of a human drops to 20
+    // km/h below their speed (see Race.concede) - but a car that lifts and
+    // then sits on the racing line has not let anybody past, it has just
+    // become a slower obstacle. So it also moves off the line, away from the
+    // side the human is on, and stops defending entirely. Without this the
+    // player caught the whole field on the last lap and finished second in a
+    // queue of cars that were all going slower than they were.
+    if (car.concedeCap != null && letBy) {
+      this.defend = 0;
+      const away = letBy.n >= car.n ? -1 : 1;
+      this.lane = car.n + away * LET_STEP;
+      this.commit = Math.max(this.commit, 0.6);
+    }
 
     // Cover the inside before they commit - one move, then leave it alone.
     if (chall && (tuning.defend ?? 0) > 0 && this.defend <= 0 &&
@@ -323,6 +355,11 @@ export class Driver {
         targetSpeed = Math.min(targetSpeed, limit * commitment * (car.paceScale ?? 1));
       }
     }
+
+    // The last-lap concession, if this difficulty has one. A cap on what the
+    // driver *aims* at rather than on the limiter, so the car lifts rather
+    // than hitting a wall - it keeps racing, it just stops driving away.
+    if (car.concedeCap != null) targetSpeed = Math.min(targetSpeed, car.concedeCap);
 
     const err = targetSpeed - car.speed;
     car.throttle = clamp(err * 0.5, 0, 1);

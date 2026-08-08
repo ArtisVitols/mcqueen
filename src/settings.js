@@ -44,11 +44,29 @@ export const DIFFICULTY = {
     aiSpeed: 0.88, aiCorner: 0.84,          // cruising
     chaseSpeed: 0.90, chaseCorner: 0.86,    // ... and with a grudge
   },
+  /**
+   * Normal is Hard, and then it lets you win.
+   *
+   * Every number below is Hard's - they race you exactly as hard, all race -
+   * with one difference: on the final lap any rival still ahead of a human
+   * lifts by `concede`, so the race comes back to you at the end however it
+   * has gone. That is the owner's specification, word for word, and it is the
+   * whole difference between the two settings.
+   */
   normal: {
-    label: 'Normal', aggression: 1.0, band: 0.3, playerSpeed: 1.0,
-    assist: 1.0, lift: 0.35, fight: 0.7, defend: 0.15,
+    label: 'Normal', aggression: 1.35, band: 0.12, playerSpeed: 1.0, grudge: 15,
+    // Every AI number here is Hard's. `lift` is not an AI number - it is the
+    // corner-braking aid on the *player's* own car - and the owner's rule was
+    // about the rivals, so this one stays at Normal's own value. Taking it
+    // away as well would have made Normal harder to drive than Hard for
+    // anybody using Sport or Pro, which is the opposite of the whole point.
+    assist: 1.0, lift: 0.35, fight: 1.0, defend: 1.0,
     aiSpeed: 0.95, aiCorner: 0.92,
-    chaseSpeed: 1.00, chaseCorner: 0.98,
+    chaseSpeed: 1.10, chaseCorner: 1.10,
+    // 20 km/h, in m/s. Applied to what a rival *aims* at, not to the limiter,
+    // so it is a lift and not a wall - they carry on racing each other and
+    // simply stop pulling away from you.
+    concede: 20 / 3.6,
   },
   hard: {
     // `grudge` is *seconds*: how long they keep the extra pace after getting

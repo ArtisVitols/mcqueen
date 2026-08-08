@@ -42,6 +42,12 @@ class Game {
 
     this.camPos = new THREE.Vector3();
     this.camAim = new THREE.Vector3();
+    // Carried across a change of ribbon - see placeCamera.
+    this._camRoad = null;
+    this._camWas = new THREE.Vector3();
+    this._aimWas = new THREE.Vector3();
+    this._camFix = new THREE.Vector3();
+    this._aimFix = new THREE.Vector3();
     this.camN = 0;
     this._camSt = {};
     this._aimSt = {};
@@ -1074,6 +1080,27 @@ class Game {
     const back = 7.6 + Math.min(3.4, car.speed * 0.05);
     const height = 2.5 + Math.min(1.0, car.speed * 0.011);
 
+    // Changing ribbon moves the *camera*, even when it does not move the car.
+    //
+    // The anchor is `car.s - back`, and eight metres behind a car sitting at
+    // the mouth of the pit lane is a completely different place on the two
+    // roads - 12 m apart turning in, 6 m coming out, in one frame. `car.n`
+    // changes meaning at the same instant. The car crosses cleanly and the
+    // view snaps, which is exactly what it looks like from the cockpit.
+    //
+    // So carry the discontinuity as an offset and let it decay: the camera
+    // keeps its old position on the frame of the handover and slides onto the
+    // new anchor over the next fraction of a second. `blend` is already the
+    // frame-rate-independent smoothing this camera uses for lane changes, so
+    // the fade costs nothing new and is stable at any frame rate.
+    const changed = this._camRoad !== track;
+    this._camRoad = track;
+    if (changed) {
+      this._camWas.copy(this.camPos);
+      this._aimWas.copy(this.camAim);
+      this.camN = car.n;           // it is an offset from a different centreline
+    }
+
     this.camN += (car.n - this.camN) * blend;
 
     const camSt = track.sample(car.s - back, this._camSt);
@@ -1085,6 +1112,17 @@ class Game {
     const aimSt = track.sample(car.s + 7, this._aimSt);
     track.position(aimSt, this.camN, this.camAim)
       .addScaledVector(track.normal(aimSt, this._w, this.camN), 1.0);
+
+    if (changed) {
+      this._camFix.copy(this._camWas).sub(this.camPos);
+      this._aimFix.copy(this._aimWas).sub(this.camAim);
+    }
+    this.camPos.add(this._camFix);
+    this.camAim.add(this._aimFix);
+    // Decayed *after* being applied, so the handover frame itself moves the
+    // camera by nothing at all rather than by a tenth of the jump.
+    this._camFix.multiplyScalar(1 - blend);
+    this._aimFix.multiplyScalar(1 - blend);
 
     this.camera.position.copy(this.camPos);
     this.camera.up.copy(up);

@@ -53,6 +53,20 @@ side of the road - against the wall or down on the apron - and takes no
 further part. It never happens right next to you, and there are never more
 than two in a race. They still appear on the results sheet, marked **OUT**.
 
+## Difficulty
+
+**Easy** drives most of the car for you: it lifts for the corners, holds a
+lane, overtakes and takes itself into the pits. Holding the throttle down wins.
+
+**Normal** races you exactly as hard as Hard does - the same pace, the same
+aggression, the same grudge - with one promise: **on the last lap nobody is
+quicker than you, and they move over.** Whatever has happened up to then, the
+race comes back to you at the end. (There is a limit: a rival more than about
+150 m up the road when the last lap starts is too far away to be caught by
+lifting.)
+
+**Hard** makes you no promises at all.
+
 ## The field
 
 Eighteen cars race, and you can drive any of them. They are not all as quick as

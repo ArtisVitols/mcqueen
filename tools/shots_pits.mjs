@@ -101,6 +101,20 @@ const advance = (seconds) => page.evaluate((s) => {
       (window.__guidoTrack ||= []).push([g.crew.guido.position.x,
         g.crew.guido.position.y, g.crew.guido.position.z]);
     }
+    // Drive the camera on the same clock, and watch it.
+    //
+    // The chase camera is anchored on whichever ribbon the car is on, so a
+    // handover moves the *view* even when it does not move the car: eight
+    // metres behind a car at the mouth of the pit lane is a different place
+    // on the two roads, and it was twelve metres turning in and six coming
+    // out - in one frame. The car crossing cleanly is not enough; this is
+    // what the owner actually sees.
+    const p0 = g.camera.position.clone();
+    const car = g.race.player;
+    g.placeCamera(car, 1 - Math.pow(0.0016, 1 / 60));
+    const moved = g.camera.position.distanceTo(p0);
+    const drove = car.speed / 60;
+    window.__camJump = Math.max(window.__camJump || 0, moved - drove);
   }
   const p = g.race.player;
   return { lap: p.lap, tyre: +p.tyre.toFixed(3), pit: p.pit, onPit: p.onPit,
@@ -202,6 +216,11 @@ if (!caught) {
     }
     return { inside, worst: +worst.toFixed(3), legs: pts.length - 1 };
   });
+  const camJump = await page.evaluate(() => +(window.__camJump || 0).toFixed(2));
+  camJump < 1.5
+    ? ok(`the camera never jumped (worst frame ${camJump.toFixed(2)} m past the car)`)
+    : fail(`the camera moved ${camJump.toFixed(1)} m more than the car in one frame`);
+
   clash.inside === 0 && clash.legs > 0
     ? ok(`his route goes round the car (${clash.legs} legs, closest approach ` +
          `${clash.worst.toFixed(2)} of a half-body)`)
