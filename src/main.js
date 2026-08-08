@@ -15,6 +15,7 @@ import { Museum } from './museum.js';
 import { PitCrew } from './pitcrew.js';
 import { Smoke, smokeFor } from './smoke.js';
 import { skyTexture } from './sky.js';
+import { makeCrowd, swayCrowd } from './crowd.js';
 
 const dom = (id) => document.getElementById(id);
 
@@ -133,6 +134,16 @@ class Game {
       this.scene.remove(this.trackScene);
       disposeTrack(this.trackScene);
     }
+    // The crowd belongs to the circuit and goes with it: only one track is
+    // ever resident, and a stand full of people from the last one would be
+    // standing in the infield of this one.
+    if (this.crowd) {
+      this.scene.remove(this.crowd);
+      this.crowd.geometry.dispose();
+      this.crowd.material.dispose();
+    }
+    this.crowd = makeCrowd(track.data);
+    if (this.crowd) this.scene.add(this.crowd);
     this.track = track;
     this.trackScene = scene;
     this.scene.add(scene);
@@ -209,6 +220,7 @@ class Game {
     const w = innerWidth, h = innerHeight;
     // Point size is in pixels, so the puffs have to follow the buffer.
     this.smoke?.resize(h * this.renderer.getPixelRatio());
+    swayCrowd(this.crowd, 0, h * this.renderer.getPixelRatio());
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -1456,6 +1468,7 @@ class Game {
       smokeFor(this.smoke, car, dt, this.smokeQuality);
     }
     this.smoke.update(dt);
+    swayCrowd(this.crowd, this.smoke.time);
 
     const player = race.player;
     this.placeCamera(player, 1 - Math.pow(0.0016, dt));

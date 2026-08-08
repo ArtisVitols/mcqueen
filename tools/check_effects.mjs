@@ -66,6 +66,46 @@ await page.evaluate(async (tid) => {
   window.game.settings.difficulty = 'normal';
   if (window.game.settings.track !== tid) await window.game.pickTrack(tid);
 }, TRACK);
+
+// --- the crowd ---------------------------------------------------------------
+//
+// Where they sit is measured off the model, so the thing that can go wrong is
+// them being measured onto the wrong thing: the top of a retaining wall, the
+// racing surface, the roof. All three look exactly like "a crowd" in a count
+// and are obvious in a picture, so this checks the geometry and then takes one.
+const crowd = await page.evaluate(() => {
+  const g = window.game;
+  const pts = g.crowd?.geometry.attributes.position;
+  if (!pts) return { n: 0 };
+  const track = g.track;
+  const st = {};
+  let onTrack = 0;
+  let low = 0;
+  let minOut = Infinity;
+  for (let i = 0; i < pts.count; i++) {
+    const x = pts.getX(i), y = pts.getY(i), z = pts.getZ(i);
+    const hit = track.project(x, z, 0, track.lapLength / 2);
+    if (!hit) continue;
+    track.sample(hit.s, st);
+    // Outboard of the corridor, by a margin: a spectator inside it is standing
+    // on the racing line.
+    const clear = hit.n - track.limit(st, 1);
+    minOut = Math.min(minOut, clear);
+    if (clear < 2) onTrack++;
+    if (y - st.y < 2) low++;
+  }
+  return { n: pts.count, onTrack, low, minOut: +minOut.toFixed(1) };
+});
+crowd.n > 200
+  ? ok(`${crowd.n} spectators in the stands`)
+  : fail(`only ${crowd.n} spectators`);
+crowd.onTrack === 0
+  ? ok(`none of them is on the circuit (nearest is ${crowd.minOut} m outside the corridor)`)
+  : fail(`${crowd.onTrack} spectators are standing on the road`);
+crowd.low === 0
+  ? ok('none of them is at road level either')
+  : fail(`${crowd.low} spectators are level with the track`);
+
 await page.click('#btn-start');
 await page.waitForFunction("window.game.race && window.game.race.state === 'racing'",
   { timeout: 300000 });
@@ -107,12 +147,12 @@ await page.evaluate(async () => {
  * looks at 60 fps on a phone. So: stop the loop, make the smoke, draw one
  * frame by hand, and take the picture of that.
  */
-async function shoot(name, slide, lookAt = null) {
+async function shoot(name, slide, lookAt = null, tilt = 0) {
   // Stop the loop *and* let any frame already in flight land, or it redraws
   // with the chase camera a moment after this one was set up.
   await page.evaluate(() => { window.game.paused = true; cancelAnimationFrame(window.game.raf); });
   await sleep(2500);
-  await page.evaluate((sl, at) => {
+  await page.evaluate((sl, at, up) => {
     const g = window.game;
     const held = { applyTo: (car, dt, ph) => {
       car.steerCmd = 0; if (!ph?.assisted) car.steer = 0; car.throttle = 1; car.brake = 0; } };
@@ -134,9 +174,10 @@ async function shoot(name, slide, lookAt = null) {
       g.camera.lookAt(c.position.x, c.position.y + 0.8, c.position.z);
     } else {
       g.placeCamera(g.race.player, 1);
+      if (up) g.camera.rotateX(up);
     }
     g.renderer.render(g.scene, g.camera);
-  }, slide, lookAt);
+  }, slide, lookAt, tilt);
   await sleep(300);
   await page.screenshot({ path: join(OUT, name) });
   await page.evaluate(() => { window.game.paused = false; window.game.loop(performance.now()); });
@@ -164,6 +205,10 @@ const after = await advance(4, 0);
 after.alive === 0
   ? ok('and it clears once the sliding stops')
   : fail(`${after.alive} puffs still alive four seconds later`);
+
+// A look up at the stands, because a count says nothing about whether they are
+// sitting in them.
+await shoot(`fx_3_crowd_${TRACK}.png`, 0, null, 0.17);
 
 // --- a wreck cooks ---------------------------------------------------------
 const who = await page.evaluate(() => {

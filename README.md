@@ -48,9 +48,9 @@ comes back to you.
 
 ## How it looks
 
-Clouds drift over the grandstands, cars that are being thrown about smoke their
-tyres, and a car that has crashed out sits at the roadside with its engine
-smoking. None of it is a downloaded file - the sky and the smoke are drawn by
+Clouds drift over the grandstands, there are people in them, cars that are
+being thrown about smoke their tyres, and a car that has crashed out sits at
+the roadside with its engine smoking. None of it is a downloaded file - the sky and the smoke are drawn by
 the game as it starts, the same way the engines are synthesised rather than
 sampled. On **Low** graphics there is less of it, on purpose.
 

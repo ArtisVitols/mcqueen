@@ -460,6 +460,23 @@ speed, steers the front pair and leans the body. Nothing re-exports a GLB -
   places and would double the count.
 - **Weld before splitting.** OBJ exports repeat each corner per face, so
   without welding every triangle is its own island.
+- **A tread block is not wheel-shaped, and is still part of the wheel.** Ivy's
+  monster-truck tyres are a smooth carcass, a ring of separate lugs and a rim,
+  each its own island and only the carcass round enough to pass `isWheel` - so
+  only the carcass turned, and the carcass is the one part with no features on
+  it. The wheels were rotating perfectly and the truck looked exactly as though
+  they were not. Wheel-shaped islands *seed* a cluster; everything else is then
+  offered to them and `adopt`ed on containment rather than shape.
+- **Adoption is tested against the seed, never the growing box.** Testing
+  against what a cluster has become is a runaway: each piece taken makes the
+  box bigger, which admits a bigger piece next time. Sarge's front wheel
+  reached a 1.2 m radius and 2,548 triangles that way.
+- **`size()` hands back a shared vector**, so measuring two boxes with it gives
+  you the second box twice - which is exactly the sort of bug that makes an
+  adoption test behave at random.
+- **A mesh with no wheel-shaped island still has to be read**, because it may
+  hold only the *pieces* of one. Bailing out on it is what left Ivy's treads
+  and rims behind.
 - **Give each wheel a compact geometry.** Sharing the vertex buffer and handing
   each wheel a narrower index is cheaper and looks fine - but every bounding box
   then still spans the whole car, and `check_ride_height` reported the split
@@ -515,6 +532,35 @@ audio has, and for the same reasons: zero bytes and zero licensing.
   shoots that.
 - Low quality halves the pool *and* the rate: it is the setting for a phone
   that is already working, and smoke is the first thing that should give way.
+
+## The crowd
+
+People in the grandstands, measured off the model by `tools/extract_crowd.mjs`
+and drawn by `src/crowd.js` as one `THREE.Points` - one draw call for a
+stadium, two triangles each, and a shader that sways them from the clock so
+the per-frame cost is one uniform. They are only ever seen from tens of metres
+away through a catch fence.
+
+- **Where they sit is raycast, not guessed.** A band placed by eye in track
+  space puts a crowd in mid-air on one circuit and inside the concrete on
+  another - the same reason the racing line and the pit road are measured.
+- **Fire the ray from the sky and take *every* hit.** A stand has a roof, and
+  a downward ray finds it first. Starting the ray under the roof does not work
+  either, because the roofs are at different heights round the lap: the first
+  attempt found seating along one straight and nowhere else. From above, a
+  stand is roof, then seats, then ground - so collect the lot and keep the
+  upward-facing surfaces that are clearly above the road.
+- **The top of a retaining wall is a level surface a few metres above the
+  road**, right beside the circuit, and it collected a tidy row of spectators
+  perched over the racing line. `OUT_FROM` and `FLOOR` are what keep them off
+  it - and Yoyleland needs its own figures entirely (`crowdScan` in
+  `tracks.json`), because its seating is a bare concrete bowl a long way out
+  and well up, not a tiered stand.
+- **Keep every qualifying tier, not the lowest.** One row per column gave a
+  crowd that was all front row with an empty bowl behind it.
+- `check_effects` asserts none of them is within two metres of the corridor or
+  at road level, which is what "measured onto the wrong thing" looks like in
+  numbers, and then photographs the stands.
 
 ## The museum
 
@@ -1137,7 +1183,8 @@ node tools/check_barriers.mjs      # walls inside the corridor, holes under the 
 node tools/check_wheels.mjs        # every wheel found, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
-node tools/check_effects.mjs       # clouds, tyre smoke, and a wreck cooking
+node tools/check_effects.mjs       # clouds, crowd, tyre smoke, a wreck cooking
+node tools/extract_crowd.mjs      # ... and where the crowd goes, per circuit
 node tools/check_museum.mjs        # every car on the plinth, and the race after
 node tools/check_crashes.mjs       # rivals have incidents, and they are safe
 node tools/shots_crash.mjs <track> # ... and a picture of one at the roadside
@@ -1239,7 +1286,8 @@ What "good" looks like right now:
   outside the corridor, get shoved back onto the racing line, start on top of
   the player, be classified ahead of somebody who finished, or stop the race
   ending. Two cars out per race is the cap and it holds.
-- `check_effects.mjs` — the sky is a texture and not a flat colour; a clean lap
+- `check_effects.mjs` — the crowd is in the stands and none of it is on the
+  road; the sky is a texture and not a flat colour; a clean lap
   makes no smoke at all; a slide makes it; it clears afterwards; the pool never
   exceeds its budget; and a wreck cooks on its own. Then the pictures, because
   "there is smoke" and "it looks like smoke" are different claims.

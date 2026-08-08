@@ -211,10 +211,14 @@ function fromSplit(pivot) {
   // carry the tyre and the rim as separate materials, so each mesh yielded a
   // clean set of four and the car ended up with eight wheels and four steered
   // ones. A wheel is a *place*, not a mesh.
+  const cut = [];
   const found = [];
+  const spare = [];
   for (const mesh of meshes) {
-    const items = splitMesh(pivot, mesh);
-    if (items) found.push(...items);
+    const split = splitMesh(pivot, mesh);
+    if (!split) continue;
+    cut.push(split);
+    for (const island of split.islands) (island.wheelish ? found : spare).push(island);
   }
   if (!found.length) return null;
 
@@ -228,6 +232,21 @@ function fromSplit(pivot) {
     else clusters.push({ items: [item], box: item.box.clone(), centre: c, radius: size(item.box).y / 2 });
   }
   if (clusters.length < MIN_WHEELS || clusters.length > MAX_WHEELS) return null;
+
+  // Now the pieces that are *in* a wheel without looking like one: tread
+  // blocks, rims, hub bolts, brake discs. Without this the parts of a wheel
+  // that have any features on them are exactly the parts left behind, and a
+  // turning wheel is indistinguishable from a still one.
+  for (const cl of clusters) cl.seed = cl.box.clone();
+  const taken = new Set(found);
+  for (const island of spare) {
+    const home = clusters.find((cl) => adopt(cl, island));
+    if (!home) continue;
+    home.items.push(island);
+    home.box.union(island.box);
+    taken.add(island);
+  }
+  for (const split of cut) split.strip(taken);
 
   const out = [];
   for (const cl of clusters) {
@@ -250,7 +269,11 @@ function fromSplit(pivot) {
       axle: new THREE.Vector3(1, 0, 0),
       up: new THREE.Vector3(0, 1, 0),
       centre,
-      radius: Math.max(MIN_RADIUS, size(cl.box).y / 2),
+      // Tread adds a little to a tyre; nothing adds a lot. Clamped to the
+      // seed, so an adoption that was slightly too generous cannot turn into
+      // a wheel that rolls at the wrong rate.
+      radius: Math.max(MIN_RADIUS,
+        Math.min(size(cl.box).y / 2, size(cl.seed).y / 2 * 1.25)),
       front: false,
     });
   }
@@ -314,8 +337,7 @@ function splitMesh(pivot, mesh) {
     list.push(k);
   }
 
-  const keep = [];
-  const rest = [];
+  const islands = [];
   for (const [, list] of tris) {
     const box = new THREE.Box3();
     for (const k of list) {
@@ -324,30 +346,82 @@ function splitMesh(pivot, mesh) {
         box.expandByPoint(p.set(pts[v * 3], pts[v * 3 + 1], pts[v * 3 + 2]));
       }
     }
-    if (list.length >= MIN_TRIS && isWheel(box)) keep.push({ list, box });
-    else rest.push(...list);
+    islands.push({
+      list,
+      box,
+      // Round, thin and sitting a radius off the road: that is a *wheel*, and
+      // only these seed a cluster. The rest are offered to the clusters
+      // afterwards - see `adopt` - because a tread block is part of a wheel
+      // without being one.
+      wheelish: list.length >= MIN_TRIS && isWheel(box),
+      material: mesh.material,
+      toPivot,
+      // A compact geometry, not the whole buffer with a narrower index. Sharing
+      // the buffer is tempting and cheaper, but every bounding box would still
+      // span the entire car: check_ride_height reported the split cars sitting
+      // three metres under the road, and shadow and frustum bounds would be just
+      // as wrong.
+      build: () => extract(geo, list, at),
+    });
   }
-  if (!keep.length) return null;
+  // Returned even when nothing here looks like a wheel. A mesh can hold only
+  // the *pieces* of one - Ivy's tread lugs and rims are their own material -
+  // and bailing out here left them behind, which is the whole bug: the parts
+  // with features on them were the parts that stayed still.
 
-  const items = keep.map(({ list, box }) => ({
-    box,
-    material: mesh.material,
-    toPivot,
-    // A compact geometry, not the whole buffer with a narrower index. Sharing
-    // the buffer is tempting and cheaper, but every bounding box would still
-    // span the entire car: check_ride_height reported the split cars sitting
-    // three metres under the road, and shadow and frustum bounds would be just
-    // as wrong.
-    build: () => extract(geo, list, at),
-  }));
-
-  // Everything that was not a wheel stays on the original mesh.
-  const remaining = [];
-  for (const k of rest) remaining.push(at(k), at(k + 1), at(k + 2));
-  geo.setIndex(remaining);
-  geo.clearGroups();
-  return items;
+  // The source geometry is *not* stripped here: which triangles leave depends
+  // on what the clusters adopt, and that is only known once every mesh has
+  // been read. `strip` is called by the caller when it is.
+  return {
+    islands,
+    strip(taken) {
+      const remaining = [];
+      for (const island of islands) {
+        if (taken.has(island)) continue;
+        for (const k of island.list) remaining.push(at(k), at(k + 1), at(k + 2));
+      }
+      geo.setIndex(remaining);
+      geo.clearGroups();
+    },
+  };
 }
+
+/**
+ * Does this leftover island belong to that wheel?
+ *
+ * **A tread block is not wheel-shaped and is still part of the wheel.** Ivy is
+ * a monster truck whose tyres are modelled as a smooth carcass plus a ring of
+ * separate lugs, with the rim as another island again: only the carcass looked
+ * like a wheel, so only the carcass turned - and the carcass is the one part
+ * with no features on it. The wheels were rotating perfectly and the truck
+ * looked exactly as though they were not.
+ *
+ * The test is containment, not shape: the piece has to sit inside the wheel it
+ * is joining and be no bigger than it. That cannot swallow the body, which
+ * fails on both counts, and it does not care what the piece is.
+ */
+function adopt(cluster, island) {
+  // Against the *seed* - the wheel-shaped islands this cluster started from -
+  // and never against what it has grown into. Testing against the growing box
+  // is a runaway: each piece taken makes the box bigger, which lets a bigger
+  // piece in next time, and three adoptions later a wheel has swallowed the
+  // chassis. Sarge's front wheel reached a 1.2 m radius and 2,548 triangles
+  // that way.
+  // Each into its own vector: `size()` hands back a shared one, so measuring
+  // two boxes with it gives you the second box twice.
+  const c = cluster.seed.getCenter(_c1);
+  const w = cluster.seed.getSize(_s1);
+  const ic = island.box.getCenter(_c2);
+  const is = island.box.getSize(_s2);
+  if (is.x > w.x * 1.25 || is.y > w.y * 1.25 || is.z > w.z * 1.25) return false;
+  return Math.abs(ic.x - c.x) < w.x * 0.75
+      && Math.abs(ic.y - c.y) < w.y * 0.6
+      && Math.abs(ic.z - c.z) < w.z * 0.6;
+}
+const _c1 = new THREE.Vector3();
+const _c2 = new THREE.Vector3();
+const _s1 = new THREE.Vector3();
+const _s2 = new THREE.Vector3();
 
 /**
  * A standalone geometry holding just these triangles.

@@ -76,7 +76,15 @@
       "profileSamples": 11,
       "pitMaterials": [],
       "pitScan": 120,
-      "pitBoxes": 18
+      "pitBoxes": 18,
+      "crowdScan": {
+        "OUT_FROM": 14,
+        "OUT_TO": 130,
+        "OUT_STEP": 3.0,
+        "FLOOR": 6,
+        "CEIL": 45,
+        "KEEP": 0.22
+      }
     }
   ]
 }
