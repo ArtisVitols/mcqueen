@@ -366,5 +366,70 @@ for (const spec of todo) {
              : fail(`only ${stops} car(s) stopped; rivals are not pitting`);
 }
 
+// ------------------------------------------------- everybody, at once --
+//
+// The owner's worst race: the whole field comes in on the same lap. What that
+// used to look like is worth writing down, because every part of it was a
+// separate bug - cars driving through each other, the entire queue crawling at
+// walking pace, everybody sideways, and nothing the player could press. The
+// three that mattered: `PitRoad` inherited `Track.delta`, which wraps through
+// `wrap` - and `wrap` clamps on a road with ends, so every car behind another
+// read as being in the same place; the contact speed penalty was charged once
+// per *pair*, so a car in a queue paid it several times a step; and nothing in
+// the lane knew it was a queue at all.
+console.log('\n=== the whole field pits on the same lap ===');
+for (const spec of todo) {
+  const data = read(`assets/${spec.data}`);
+  if (!data.pit) continue;
+  const track = new Track(data);
+  const entries = CARS.map((c) => ({ spec: c, object: new THREE.Object3D() }));
+  const race = new Race(track, entries, { difficulty: 'normal', laps: 10,
+    physics: 'arcade', car: 'lightning_mcqueen' }, spec.gridLanes)
+    .build('lightning_mcqueen');
+  race.crashRate = 0;
+  // No stagger, no mercy: everybody's tyres are "gone" at once.
+  for (const c of race.field) c.pitAt = 0.75;
+  const player = race.player;
+
+  const DT = 1 / 120;
+  let t = 0;
+  let overlap = 0;
+  let stuck = 0;                    // seconds crawling while not being serviced
+  let peak = 0;
+  while (race.state !== State.FINISHED && t < 1500) {
+    race.update(DT, AIM_LEFT);
+    t += DT;
+    const lane = race.field.filter((c) => c.onPit);
+    peak = Math.max(peak, lane.length);
+    if (player.onPit && (player.pit === 'in' || player.pit === 'leaving')
+        && player.speed * 3.6 < 8) stuck += DT;
+    for (let i = 0; i < lane.length; i++) {
+      for (let j = i + 1; j < lane.length; j++) {
+        const a = lane[i], b = lane[j];
+        if (Math.abs(b.s - a.s) > 4) continue;
+        overlap = Math.max(overlap, 2.3 - Math.abs(b.n - a.n));
+      }
+    }
+  }
+
+  console.log(`\n  ${spec.short}`);
+  const stops = race.field.filter((c) => c.pitStops > 0).length;
+  race.state === State.FINISHED
+    ? ok(`the race finished (${t.toFixed(0)} s, peak ${peak} cars in the lane)`)
+    : fail('the race never finished - the pit lane is blocked');
+  // A touch is not a pile-up: `separate` settles two cars at exactly the
+  // 2.3 m it keeps them apart by, so zero is the number it aims for and a
+  // hair either side of it is arithmetic.
+  overlap < 0.1
+    ? ok(`no two cars were ever in the same place (closest ${overlap.toFixed(2)} m of overlap)`)
+    : fail(`two cars overlapped by ${overlap.toFixed(2)} m - they drove through each other`);
+  stops === race.field.length
+    ? ok(`all ${stops} of them got their stop`)
+    : fail(`only ${stops} of ${race.field.length} stopped - the queue turned somebody away for good`);
+  stuck < 6
+    ? ok(`the player was never stuck (${stuck.toFixed(1)} s below 8 km/h in the lane)`)
+    : fail(`the player crawled for ${stuck.toFixed(1)} s with nobody working on the car`);
+}
+
 console.log(failed ? `\n${failed} problem(s)` : '\nthe pit roads are real, clear and driveable');
 process.exit(failed ? 1 : 0);

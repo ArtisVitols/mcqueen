@@ -251,36 +251,36 @@ for (const physics of Object.keys(PHYSICS)) {
     continue;
   }
 
-  // Hard has to be a race you can join - somebody to fight - and one where
-  // fewer of those fights come off than on Normal.
+  // **Normal and Hard are the same race, on purpose.**
+  //
+  // Every AI number in Normal is Hard's; the only difference is the rule on
+  // the final lap, which has its own section below. So there is nothing to
+  // assert here about one being harder than the other - which of the two shows
+  // more duels in a given seeded run is noise, and an ordering asserted between
+  // two identical settings is a test that fails for no reason. It did: Normal
+  // came out with 109 duels to Hard's 82 under Sport, and both of those are
+  // simply "a lot".
+  //
+  // What both of them owe the player is a race worth having, and what Easy
+  // owes them is the opposite. Those are the ends worth pinning.
   if (h.entries < 4) {
     console.log(`  ! ${physics}: Hard never gives the player anyone to race ` +
                 `(${h.entries} duels)`);
     failed++;
   }
-  // **What separates Hard from Normal is how hard they come back at you.**
-  //
-  // The conversion rate is still printed, and it is still the right question
-  // for a *person* - but it stopped being a difficulty signal when the grid
-  // went from seven cars to eighteen. With a full field the player is in
-  // traffic the whole race, so the rate measures how dense the pack is at
-  // least as much as how hard it is to pass, and it now reads *higher* on
-  // Hard than on Normal under two of the three models while every other
-  // number says Hard is plainly harder: three to seven times the duels, and
-  // three to seven times the places taken back. Those are what is asserted.
-  if (h.lost <= n.lost) {
-    console.log(`  ! ${physics}: Hard takes no more places back than Normal ` +
-                `(${h.lost} vs ${n.lost})`);
+  if (n.entries < 4) {
+    console.log(`  ! ${physics}: Normal never gives the player anyone to race ` +
+                `(${n.entries} duels)`);
     failed++;
   }
-  if (h.entries <= n.entries) {
-    console.log(`  ! ${physics}: Hard is no more of a fight than Normal ` +
-                `(${h.entries} duels vs ${n.entries})`);
-    failed++;
-  }
-  // ... and one where a place, once taken, has to be held.
+  // A place taken on Hard has to be held.
   if (h.passed > 0 && h.lost < 1) {
     console.log(`  ! ${physics}: Hard never takes a place back off the player`);
+    failed++;
+  }
+  if (e.entries > n.entries) {
+    console.log(`  ! ${physics}: Easy is more of a fight than Normal ` +
+                `(${e.entries} duels vs ${n.entries})`);
     failed++;
   }
 }

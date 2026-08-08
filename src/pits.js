@@ -62,6 +62,23 @@ export class PitRoad extends Track {
     return i < 0 || i >= this.count ? -1 : i;
   }
 
+  /**
+   * How far ahead `b` is of `a`. On a road with ends, that is a subtraction.
+   *
+   * **This override was missed when the ribbon was written, and it is the one
+   * that hurt.** `Track.delta` wraps its answer into half a lap by calling
+   * `this.wrap` - and `wrap` here *clamps*, so every car that was behind
+   * another came out as being in exactly the same place. `Race.separate` reads
+   * this: sixteen cars strung down a 500 m pit lane were all treated as
+   * touching, so they were shoved sideways into each other and charged the
+   * contact speed penalty until the whole queue was crawling at walking pace,
+   * sideways, with the player among them. Two hundred metres of clear road
+   * between two cars and the game thought they were on top of each other.
+   */
+  delta(a, b) {
+    return b - a;
+  }
+
   /** Stations either side of `d`, never blending past the last one. */
   span(d) {
     const last = this.count - 1;

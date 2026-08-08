@@ -170,6 +170,11 @@ export class Race {
       car.pitTimer = 0;
       car.pitStops = 0;
       car.pitDone = -1;
+      // When this car decides its tyres have gone. Scattered, because a field
+      // that all wears at the same rate all comes in on the same lap - and
+      // sixteen cars in one pit lane is a queue nobody enjoys, however well it
+      // is handled. Real teams stagger their stops for the same reason.
+      car.pitAt = AI_PIT_AT * (0.7 + this.rng() * 0.6);
       car.crash = null;                 // seconds into an incident, or null
       car.out = false;                  // ... and parked at the side for good
 
@@ -321,7 +326,7 @@ export class Race {
         // never merely being near the edge. On Easy the aid parks the car on
         // the low line, so "close enough" pitted a five-year-old every single
         // lap without them touching anything, and Easy stopped being a win.
-        if (auto || car.steerCmd < -0.2) this.pits.tryEnter(car);
+        if (auto || car.steerCmd < -0.2) this.pits.tryEnter(car, this.field);
       }
     }
 
@@ -345,7 +350,7 @@ export class Race {
         // A rival has to be *steered* in. Without this it wants to pit, is
         // told it may, and sails past the entry every lap on the racing line.
         this.aimForPits(car, dt);
-        this.pits.tryEnter(car);
+        this.pits.tryEnter(car, this.field);
       }
     }
 
@@ -482,7 +487,7 @@ export class Race {
     }
     car.topSpeed = Math.min(car.pitSpeedWas, this.pits.speedLimit);
     const was = car.pit;
-    const took = this.pits.step(car, dt, this.serviceTime, car.gridIndex);
+    const took = this.pits.step(car, dt, this.serviceTime, car.gridIndex, this.field);
     if (was === Pit.SERVICE && car.pit === Pit.LEAVING) car.pitStops++;
     return took;
   }
@@ -495,7 +500,7 @@ export class Race {
    * throws away a place for nothing.
    */
   shouldPit(car) {
-    if (!this.pits || car.tyre > AI_PIT_AT) return false;
+    if (!this.pits || car.tyre > (car.pitAt ?? AI_PIT_AT)) return false;
     const left = this.totalLaps * this.track.lapLength - car.progress;
     return left > this.track.lapLength * 1.2;
   }
@@ -546,7 +551,10 @@ export class Race {
     // Whichever ribbon it is on: a car can take the flag on its way down the
     // pit lane, and steering it towards the *circuit's* outside wall from in
     // there would drive it through the pit wall.
-    if (car.onPit && this.pits) { this.pits.step(car, dt, this.serviceTime, car.gridIndex); return; }
+    if (car.onPit && this.pits) {
+      this.pits.step(car, dt, this.serviceTime, car.gridIndex, this.field);
+      return;
+    }
     const st = car.road.sample(car.s, car.st);
     car.steer = laneSteer(car, car.road.limit(st, 1) - 1.0, dt);
     const target = car.topSpeed * 0.45;
@@ -656,6 +664,7 @@ export class Race {
     // Cars that are where they are meant to be and are not going to be moved:
     // a wreck at the roadside, and a car stopped on its mark being serviced.
     const fixed = (c) => c.out || c.pit === Pit.STOPPED || c.pit === Pit.SERVICE;
+    const slow = new Map();       // car -> the harshest contact it earned
     for (let i = 0; i < f.length; i++) {
       for (let j = i + 1; j < f.length; j++) {
         const a = f[i], b = f[j];
@@ -705,10 +714,16 @@ export class Race {
         const left = 2.3 - Math.abs(b.n - a.n);
         const behind = ds > 0 ? a : b;
         if (fixed(behind)) continue;              // it is already stopped
+        // Recorded, not applied. **Once per car, not once per neighbour.**
+        // Charging it per pair compounds: in a queue a car is behind several
+        // others at once, and 0.6 per second each became 97% of its speed gone
+        // in a second. That is what a pit lane full of cars felt like - ten
+        // km/h, sideways, and nothing the driver could do about it.
         const keep = left > 0 ? 1 - Math.min(0.35, left * 0.2) : 0.6;
-        behind.speed *= Math.pow(keep, dt);
+        slow.set(behind, Math.min(slow.get(behind) ?? 1, keep));
       }
     }
+    for (const [car, keep] of slow) car.speed *= Math.pow(keep, dt);
   }
 
   /** How much further this car can move towards `sign` before leaving the road. */

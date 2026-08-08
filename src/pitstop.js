@@ -47,6 +47,20 @@ const EXIT_HOLD = 2.4;
 // has to clear the edge, and every metre of it is a metre the car is not
 // using of the pit road.
 const EXIT_MARGIN = 1.2;
+// Queueing in the lane: how far ahead to look, how close two cars count as
+// being in the same line, and the gap left to the car in front.
+const QUEUE_LOOK = 70;
+const QUEUE_WIDE = 2.6;
+const QUEUE_GAP = 6.5;
+const QUEUE_DECEL = 6.0;
+// How near its box a car has to be for "it has stopped" to mean "it has
+// arrived". Generous - it only has to beat the queue - see the note in IN.
+const BOX_STALL = 12;
+// Metres of pit road that must be empty before a car may turn in.
+const ENTRY_CLEAR = 8;
+// ... and how many seconds of the entering car's own speed have to be clear
+// in front of it as well.
+const ENTRY_SECONDS = 1.2;
 
 /** How long the crew take, per difficulty. Easy is fastest - see below. */
 export const SERVICE_TIME = { easy: 3.0, normal: 5.5, hard: 8.0 };
@@ -99,7 +113,7 @@ export class PitLane {
     return d >= 0 && d <= this.entryWindow;
   }
 
-  tryEnter(car) {
+  tryEnter(car, field = null) {
     if (!this.canEnter(car)) return false;
     const st = this.track.sample(car.s, {});
     const inside = this.track.limit(st, -1);
@@ -125,6 +139,23 @@ export class PitLane {
     if (hit.n < this.road.limit(pst, -1) - ENTRY_REACH ||
         hit.n > this.road.limit(pst, 1) + ENTRY_REACH) return false;
     const n = THREE.MathUtils.clamp(hit.n, this.road.limit(pst, -1), this.road.limit(pst, 1));
+    // Not on top of somebody who is already in. The entry taper is barely
+    // wider than a car - a metre and a bit at Motor Speedway - so two cars
+    // turning in together have nowhere to be but the same place, and the
+    // handover would put one inside the other. Refusing costs a lap; landing
+    // on somebody costs the pile-up this whole queue exists to prevent.
+    if (field) {
+      // The room needed is the room to *stop* in. A car turns in at racing
+      // speed and the limiter takes a second to bring it down, so diving into
+      // a lane with a stationary queue thirty metres in is a collision however
+      // hard it then brakes.
+      const need = Math.max(ENTRY_CLEAR, car.speed * ENTRY_SECONDS);
+      for (const other of field) {
+        if (other === car || other.road !== this.road) continue;
+        const ahead = other.s - hit.s;
+        if (ahead > -ENTRY_CLEAR && ahead < need) return false;
+      }
+    }
     car.useRoad(this.road, hit.s, n);
     car.pit = Pit.IN;
     car.pitTimer = 0;
@@ -242,7 +273,7 @@ export class PitLane {
    * the brakes are on and the speed is zeroed. A car creeping out from under
    * the crew is the one thing that would make the whole thing look broken.
    */
-  step(car, dt, serviceTime, boxIndex) {
+  step(car, dt, serviceTime, boxIndex, field = null) {
     if (car.pit === Pit.OUT) return false;
 
     const box = this.road.boxFor(boxIndex);
@@ -271,7 +302,8 @@ export class PitLane {
       // box, which is a car-length off a painted rectangle you can see.
       const left = box.d - car.s;
       const curve = Math.sqrt(Math.max(0, 2 * STOP_DECEL * left));
-      const target = left <= 0 ? 0 : Math.min(this.road.speedLimit, curve);
+      const target = Math.min(left <= 0 ? 0 : Math.min(this.road.speedLimit, curve),
+                              this.queueSpeed(car, field));
       car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.5, 0, 1);
       car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.35, 0, 1);
 
@@ -280,8 +312,16 @@ export class PitLane {
       // at all, because at zero speed it cannot be fixed - two conditions
       // where the second is unreachable once the first is true is the
       // definition of a deadlock, and it cost a whole race once.
+      // Stopped *here*, not stopped anywhere. The `car.speed < 0.05` half is
+      // the anti-deadlock rule - a car that cannot quite creep onto its mark
+      // still gets served, because at zero speed it can no longer steer - but
+      // it has to stay a rule about arriving. Now that the lane is a queue a
+      // car can be brought to a complete halt a long way short of its box, and
+      // without this bound it was serviced where it stood: frozen for eight
+      // seconds in the middle of the road, with everybody behind it.
       const onMark = Math.abs(left) < BOX_REACH;
-      if (car.speed < STOP_SPEED && (onMark || car.speed < 0.05)) {
+      const nearly = Math.abs(left) < BOX_STALL;
+      if (car.speed < STOP_SPEED && (onMark || (car.speed < 0.05 && nearly))) {
         car.pit = Pit.STOPPED;
         car.pitTimer = 0;
       }
@@ -331,7 +371,7 @@ export class PitLane {
     const out = car.s > this.lastBox + BOX_REACH;
     car.steer = laneSteer(car, out ? this.exitN : this.laneFor(car), dt,
                           out ? EXIT_HOLD : LANE_HOLD);
-    const target = this.road.speedLimit;
+    const target = Math.min(this.road.speedLimit, this.queueSpeed(car, field));
     car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.4, 0, 1);
     car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.2, 0, 1);
     // Rejoin the moment the taper has actually merged, rather than at the last
@@ -341,6 +381,43 @@ export class PitLane {
     if (at) this.leave(car, at);
     else if (car.s >= this.road.length - 1) this.leave(car);
     return true;
+  }
+
+  /**
+   * How fast this car may go without driving into the one in front.
+   *
+   * **A pit lane is a queue and nothing in here knew it.** The AI's "do not
+   * drive through the back of anybody" lives in `ai.js`, and a car in the lane
+   * never reaches it: the state machine takes the controls and returns before
+   * the driver runs. So sixteen cars all aimed at the speed limit and drove
+   * straight through each other - piled up, sideways, crawling, with the
+   * player among them and no button that would help.
+   *
+   * Braked on the distance remaining, the same curve the stop itself uses, so
+   * a car settles a car's length behind the one ahead instead of hitting it.
+   * The lateral test is what keeps it a *lane* rule: a car being serviced sits
+   * against the wall, several metres off the through-lane, and must not stop
+   * the queue driving past it.
+   */
+  queueSpeed(car, field) {
+    if (!field) return Infinity;
+    let gap = Infinity;
+    for (const other of field) {
+      if (other === car || other.road !== car.road) continue;
+      // The pit road has ends, so this is a plain subtraction: no wrapping,
+      // and anything behind is simply negative.
+      const ahead = other.s - car.s;
+      if (ahead <= 0 || ahead > QUEUE_LOOK) continue;
+      if (Math.abs(other.n - car.n) > QUEUE_WIDE) continue;
+      gap = Math.min(gap, ahead);
+    }
+    if (gap === Infinity) return Infinity;
+    // Braked harder than the stop on the mark is. `STOP_DECEL` is tuned to put
+    // a car gently on a painted rectangle; this is a car avoiding the one in
+    // front, and at the pit limit it needs 40 m rather than 93 to do it. Using
+    // the gentle figure meant a car joining the back of a stopped queue simply
+    // could not stop in time and drove into it.
+    return Math.sqrt(Math.max(0, 2 * QUEUE_DECEL * (gap - QUEUE_GAP)));
   }
 
   /** The pit speed limit, for whoever is holding the rev limiter. */

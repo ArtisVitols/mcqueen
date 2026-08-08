@@ -675,6 +675,39 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   where a pitting car is: `s` on the pit ribbon is a distance down a different
   coordinate system, so easing towards it with `track.delta` would interpolate
   between two of them.
+- **A pit road has ends, so `delta` is a subtraction.** `PitRoad` inherits
+  `Track.delta`, which wraps its answer into half a lap *through `wrap`* - and
+  `wrap` here clamps. So `delta(458, 215)` came back as **0**: every car behind
+  another read as being in exactly the same place. `Race.separate` reads this,
+  so sixteen cars strung down a 500 m lane were all treated as touching, shoved
+  sideways into each other and charged the contact penalty until the queue was
+  crawling sideways at walking pace with the player in it. One missing override,
+  and it is the single worst bug this feature has had.
+- **The contact speed penalty is charged once per car, not once per pair.**
+  A car in a queue is behind several others at once, and 0.6 per second each
+  compounded to 97% of its speed gone in a second. `separate` records the
+  harshest contact per car and applies it after the pair loop.
+- **A pit lane is a queue, and nothing in it knew that.** The AI's "do not
+  drive through the back of anybody" lives in `ai.js`, and a car in the lane
+  never reaches it - the state machine takes the controls and returns first. So
+  every car aimed at the speed limit regardless of what was in front.
+  `queueSpeed` brakes on the gap, and on a *firmer* figure than the stop uses:
+  `STOP_DECEL` is tuned to place a car gently on a painted rectangle and needs
+  93 m from the pit limit, which is longer than the lane's useful length.
+- **Turning in needs room to stop in, not just room to fit.** A car enters at
+  racing speed and the limiter takes a second to bring it down, so a lane with
+  a stationary queue thirty metres in is a collision however hard it then
+  brakes. `tryEnter` refuses unless `ENTRY_SECONDS` of the car's *own speed* is
+  clear ahead - and refusing costs a lap, which is the cheaper mistake.
+- **"It has stopped" is not "it has arrived".** The anti-deadlock rule that
+  services a car which cannot creep the last metre onto its mark also serviced
+  one the queue had halted a hundred metres short - frozen mid-road with the
+  whole lane behind it. It is bounded by `BOX_STALL` now.
+- **The whole field pitting on one lap is a test, not a hypothetical.** It is
+  what the owner hit. `check_pits` forces it on every circuit and asserts no
+  two cars ever occupy the same place, everybody still gets served, and the
+  player is never stuck. `car.pitAt` also scatters the AI's threshold, because
+  a field that all wears at one rate all comes in on one lap.
 - **The pit lane has a through-lane, and it is not the row of boxes.** The
   boxes are against the wall, so aiming at one from the entry drives the whole
   length of the pits over every other car's box - which is where a rival being
