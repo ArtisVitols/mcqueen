@@ -1,13 +1,13 @@
 /**
- * Two people, two devices, one race.
+ * Up to four people, up to four devices, one race.
  *
  * The host runs the real `Race` at the usual fixed step and owns the result.
- * The guest sends which buttons are down and renders what it is told. Chosen
- * over lockstep because lockstep stalls *both* players on one late packet, and
+ * Guests send which buttons are down and render what they are told. Chosen
+ * over lockstep because lockstep stalls *everybody* on one late packet, and
  * one of the players is five years old.
  *
  *   guest buttons  --30 Hz-->  host    applied where input.applyTo already is
- *   host snapshots --20 Hz-->  guest   every car's (s, n, psi, speed)
+ *   host snapshots --20 Hz-->  guests  every car's (s, n, psi, speed)
  *
  * A car's whole state is five numbers, so a snapshot of the grid is a couple
  * of hundred bytes and bandwidth is a non-issue. Latency is the problem, and
@@ -28,12 +28,39 @@ export const INPUT_HZ = 30;
 
 /** Message kinds. Kept to one letter each: this goes out 30 times a second. */
 export const MSG = {
-  HELLO: 'h',        // guest -> host: I am here, and this is the car I want
-  START: 's',        // host -> guest: settings and the grid, go
+  JOIN: 'h',         // guest -> host: I am here, and this is the car I want
+  LOBBY: 'l',        // host -> all: who is in, what they drive, what is set
+  PICK: 'p',         // guest -> host: I would like this car instead
+  READY: 'r',        // guest -> host: I am ready (or no longer am)
+  START: 's',        // host -> all: settings and the grid, go
   INPUT: 'i',        // guest -> host: buttons
   SNAP: 'n',         // host -> guest: where everything is
   BYE: 'b',
 };
+
+/** The most people who can share a grid. */
+export const MAX_PLAYERS = 4;
+
+/**
+ * The lobby, as the host sees it and everybody else renders it.
+ *
+ * The host owns this exactly as it owns the race: guests send intents - pick
+ * this car, I am ready - and draw whatever the last one of these said. No
+ * guest ever works out lobby state for itself, which is the same rule that
+ * keeps the two ends of a race from disagreeing about a place.
+ *
+ * It doubles as the advert a room shows in the JOIN list, because the host
+ * sends one the moment a connection opens - see `list` in net/peer.js.
+ */
+export function lobbyMessage(room, players, settings, canStart) {
+  return {
+    t: MSG.LOBBY,
+    room,
+    canStart,
+    settings,
+    players: players.map((p) => ({ id: p.id, car: p.car, ready: !!p.ready, host: !!p.host })),
+  };
+}
 
 /** Buttons as a bitmask, so an input message is one number. */
 export function packButtons(state) {

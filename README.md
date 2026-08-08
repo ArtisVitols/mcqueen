@@ -86,20 +86,27 @@ slowly. Drag to spin it round, pinch to zoom, and use the arrows to step
 through all twenty - the eighteen racers plus Guido and Mack, who do not race
 but are worth a look.
 
-## Two players
+## Multiplayer
 
-**2 PLAYERS** on the menu. One of you taps HOST and reads out the four-letter
-code; the other taps JOIN and types it. You then race each other *and* the rest
-of the field on the usual grid, from anywhere - it goes phone to phone over WebRTC,
-using a free public broker only to introduce the two devices.
+**MULTIPLAYER** on the menu, for **up to four of you on four phones**.
 
-The host picks the circuit, the laps, the handling and how hard the AI is.
-Each of you picks your own **help** separately, which is the point: a
-five-year-old can have the car lifting and steering for them while you have
-none, in the same race.
+One taps **HOST A RACE** and gets a room; the others tap **JOIN A RACE** and
+the games it finds are listed - there is no code to type. Tap one and you are
+all in the same lobby, on the same screen: who is in, what each of you is
+driving, and who has pressed READY.
 
-If the other phone drops out, their car is taken over by the AI and the race
-carries on.
+Everybody picks their own car and nobody can take one that is already taken.
+The **host** chooses the circuit, the laps, the difficulty, the handling, how
+much help the cars give and how many AI cars fill the grid - changing any of it
+asks everybody to press READY again. When all of them are green the host's
+**RACE** button lights up.
+
+It goes phone to phone over WebRTC and only uses a free public broker to
+introduce the devices, so it needs the internet rather than just the same wifi.
+There are eight rooms; if they are all busy, wait a minute.
+
+If a phone drops out, that car is taken over by the AI and the race carries on
+for everybody else.
 
 ## Handling
 
@@ -233,7 +240,8 @@ node  tools/check_pits.mjs         # pit roads on asphalt, and a stop end to end
 node  tools/shots_pits.mjs yoyle   # ... and a picture of Guido doing it
 node  tools/check_fullscreen.mjs   # rotate to landscape, and the tap fallback
 node  tools/check_netplay.mjs      # host and guest agree, at four latencies
-node  tools/check_twoplayer.mjs    # two real tabs through the real menus
+node  tools/check_lobby.mjs        # four in a lobby, in one process
+node  tools/check_twoplayer.mjs    # three real tabs through the real menus
 node  tools/shots.mjs              # drive the real game in headless Chrome
 node  tools/shots_tracks.mjs       # ... on every circuit
 ```

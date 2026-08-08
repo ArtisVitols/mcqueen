@@ -8,13 +8,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>McQueen Speedway</title>
-<link rel="stylesheet" href="styles.css?v=20260808-0505-a195650">
+<link rel="stylesheet" href="styles.css?v=20260808-0703-759fbf4">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>">
 <!-- Stamped by tools/stamp_version.py on every deploy. GitHub Pages serves
      everything with max-age=600, so without this a phone can hold a new
      track-data.json alongside the previous track.glb for ten minutes - which
      is exactly how you end up with cars floating over a flattened road. -->
-<script>window.__BUILD__ = '20260808-0505-a195650';</script>
+<script>window.__BUILD__ = '20260808-0703-759fbf4';</script>
 <script type="importmap">
 {
   "imports": {
@@ -42,7 +42,7 @@
      at <b id="menu-track">Motor Speedway of the South</b></p>
   <div class="menu-buttons">
     <button id="btn-start" class="big">START</button>
-    <button id="btn-two" class="big ghost">2 PLAYERS</button>
+    <button id="btn-two" class="big ghost">MULTIPLAYER</button>
     <button id="btn-museum" class="big ghost">MUSEUM</button>
     <button id="btn-options" class="big ghost">OPTIONS</button>
   </div>
@@ -86,12 +86,12 @@
   </div>
 </div>
 
-<!-- two players ----------------------------------------------------------- -->
+<!-- multiplayer: host or join --------------------------------------------- -->
 <div id="two" class="screen hidden">
   <div class="panel">
-    <h2>Two Players</h2>
-    <p class="two-lead">One of you hosts and reads out the code.<br>
-       The other joins with it. You race each other and the AI together.</p>
+    <h2>Multiplayer</h2>
+    <p class="two-lead">Up to four of you, on four phones.<br>
+       One hosts the race, the others join it.</p>
 
     <div id="two-pick" class="menu-buttons row">
       <button id="btn-host" class="big">HOST A RACE</button>
@@ -99,24 +99,55 @@
     </div>
 
     <div id="two-host" class="hidden">
-      <label class="row-label">Read this out</label>
-      <div id="room-code" class="code">----</div>
       <p id="host-status" class="hint">Reaching the lobby…</p>
     </div>
 
+    <!-- The games we found. There is no code to type: HOST takes a numbered
+         room and JOIN knocks on all of them. -->
     <div id="two-join" class="hidden">
-      <label class="row-label">Type their code</label>
-      <input id="join-code" class="code-input" maxlength="4" autocomplete="off"
-             autocapitalize="characters" spellcheck="false" placeholder="ABCD">
-      <button id="btn-connect" class="big">CONNECT</button>
+      <label class="row-label">Games we found</label>
+      <div id="room-list" class="rooms"></div>
       <p id="join-status" class="hint"></p>
+      <button id="btn-refresh" class="big ghost">LOOK AGAIN</button>
     </div>
 
-    <label class="row-label">How much help do you want?</label>
-    <div id="opt-help" class="pills"></div>
-    <p class="hint">Each of you picks your own. The AI difficulty is the host's.</p>
-
     <button id="btn-two-back" class="big ghost">BACK</button>
+  </div>
+</div>
+
+<!-- the lobby, the same screen for everybody -------------------------------- -->
+<div id="lobby" class="screen hidden">
+  <div class="panel">
+    <h2>Room <span id="lobby-room">1</span></h2>
+    <div class="opt-cols">
+      <div class="opt-col">
+        <label class="row-label">Players</label>
+        <ol id="lobby-players" class="players"></ol>
+        <label class="row-label">Your car</label>
+        <div id="lobby-cars" class="cards"></div>
+      </div>
+      <div class="opt-col">
+        <!-- Host only. Everybody else sees what was chosen, in the list above. -->
+        <div id="lobby-host" class="hidden">
+          <label class="row-label">Race track</label>
+          <div id="lobby-track" class="cards"></div>
+          <div class="opt-grid">
+            <div><label class="row-label">Laps</label><div id="lobby-laps" class="pills"></div></div>
+            <div><label class="row-label">Difficulty</label><div id="lobby-difficulty" class="pills"></div></div>
+            <div><label class="row-label">Handling</label><div id="lobby-physics" class="pills"></div></div>
+            <div><label class="row-label">Help</label><div id="lobby-help" class="pills"></div></div>
+          </div>
+          <label class="row-label">AI cars</label>
+          <div id="lobby-ai" class="pills"></div>
+        </div>
+        <p id="lobby-hint" class="hint"></p>
+        <div class="menu-buttons row">
+          <button id="btn-ready" class="big hidden">READY</button>
+          <button id="btn-race" class="big hidden" disabled>RACE</button>
+          <button id="btn-leave" class="big ghost">LEAVE</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -209,6 +240,6 @@
   </div>
 </div>
 
-<script type="module" src="src/main.js?v=20260808-0505-a195650"></script>
+<script type="module" src="src/main.js?v=20260808-0703-759fbf4"></script>
 </body>
 </html>

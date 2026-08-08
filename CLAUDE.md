@@ -724,11 +724,49 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   the two surfaces look continuous. Yoyleland's lane needs no naming at all: it
   is 80 m of grass away and is found by shape.
 
-## Two players, two devices
+## The lobby
 
-**2 PLAYERS** on the main menu; START is still single-player and unchanged.
-One phone hosts and shows a four-letter code, the other types it in, and they
-race each other plus the rest of the field on the usual grid.
+**MULTIPLAYER** on the main menu, then HOST or JOIN. Up to **four people**
+share a grid; `src/net/lobby.js` is the whole of it and `check_lobby.mjs`
+drives it in one process.
+
+- **A browser cannot scan a local network.** No mDNS, no UDP, no sockets, and
+  this is a static site with no server behind it. The owner asked for JOIN to
+  *find* the games, so rooms are **eight numbered slots on the broker**: a host
+  takes the first free one, and JOIN knocks on all eight and lists whoever
+  answers. It behaves like discovery and needs nothing running - but it is the
+  public broker, so it needs internet rather than only wifi, and the slots are
+  global. The room number is on screen for exactly that reason.
+- **Probing is joining.** A free slot rejects a connection at once; a held one
+  opens, and the host greets every new connection with its lobby *before*
+  deciding whether to seat it. So the advert a room shows in the list is the
+  lobby state, there is no second protocol for browsing, and the connection to
+  the room you pick is the one you play on.
+- **The host owns the lobby exactly as it owns the race.** Guests send intents
+  - pick this car, I am ready - and draw whatever the last `MSG.LOBBY` said.
+  Asking for a car somebody has taken is *refused*, and the refusal arrives as
+  the next broadcast rather than as an error a guest has to handle.
+- **`MSG.START` carries the field, not just the settings.** With an AI count
+  the grid is no longer every car, so "both devices lay out the same grid"
+  needs the *list* to travel - otherwise two phones pick two different sets of
+  AI and the race differs from the lights out.
+- **Changing anything un-readies everybody.** Agreeing to a race and then being
+  taken to a different circuit is the same class of surprise as the grid
+  disagreeing, and it is cheaper to prevent than to explain.
+- **`onGuest` is a callback, not a promise.** One line, and it is the whole
+  difference between two players and four: the old transport resolved
+  `waitForGuest` on the first connection and dropped every later one.
+- **A short field is now possible** - the host can ask for two cars - and
+  nothing had raced fewer than seven since the grid work. `check_lobby` runs a
+  two-car and a four-car race on every circuit for that reason.
+- Loopback addresses every message (`{to, from, msg}`) so three tabs can share
+  one BroadcastChannel; `fake.js` needs nothing, since a test makes one link
+  per guest.
+
+## Up to four players, four devices
+
+START is still single-player and unchanged. Everything below is what happens
+once the lobby above has sent `MSG.START`.
 
 `src/net.js` is the protocol, `src/net/guest.js` the guest's view, and there
 are three transports behind one `send` / `onMessage` / `close` interface:
@@ -1033,7 +1071,8 @@ node tools/check_pits.mjs          # pit roads on asphalt, and a stop end to end
 node tools/shots_pits.mjs <track>  # ... and a picture of Guido doing it
 node tools/check_fullscreen.mjs    # rotate to landscape, and the tap fallback
 node tools/check_netplay.mjs       # host and guest agree, at four latencies
-node tools/check_twoplayer.mjs     # two real tabs through the real menus
+node tools/check_lobby.mjs         # four in a lobby, in one process
+node tools/check_twoplayer.mjs     # three real tabs through the real menus
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
 node tools/test_pause.mjs          # in-race pause menu, controls layout
@@ -1140,10 +1179,17 @@ What "good" looks like right now:
   predicts its own car, so two cars finishing 0.05 s apart are inside that same
   round trip by an order of magnitude and no correct netcode can resolve them.
   What must never differ is a place that was actually decided.
-- `check_twoplayer.mjs` — two tabs build an identical grid, drive, agree on
+- `check_lobby.mjs` — a host and three guests over fake links: the room fills
+  and turns away a fifth, two people cannot take the same car, RACE stays dark
+  until every guest is green, a settings change un-readies them, and all four
+  devices build a byte-identical grid with a pit box each. Then a two-car and a
+  four-car race on every circuit, because the host can now ask for a field
+  smaller than anything that has raced since the grid was widened.
+- `check_twoplayer.mjs` — three tabs build an identical grid, drive, agree on
   where everybody is to within a few metres, clear the start lights, and
-  survive one of them closing. It uses the loopback transport, so a green run
-  says nothing about the broker: only two real devices can.
+  survive one of them closing, and the lobby fits 667x375, 844x390 and
+  915x412 with the buttons on screen. It uses the loopback transport, so a
+  green run says nothing about the broker: only real devices can.
 - Ride quality: vertical jitter under ~0.5 g at 50 m/s and yaw wobble under
   0.1 deg per station. Above about 1 g the car visibly shakes.
 - A session downloads ~5.2 MB on Motor Speedway and reaches the menu in about

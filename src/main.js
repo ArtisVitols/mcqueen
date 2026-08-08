@@ -10,6 +10,7 @@ import { QUALITY, DIFFICULTY, LAP_CHOICES } from './settings.js';
 import { PHYSICS, driverAid } from './physics.js';
 import { MSG, RemoteInput, packButtons, snapshot, SNAPSHOT_HZ, INPUT_HZ } from './net.js';
 import { GuestView } from './net/guest.js';
+import { Lobby } from './net/lobby.js';
 import { Museum } from './museum.js';
 import { PitCrew } from './pitcrew.js';
 
@@ -38,7 +39,7 @@ class Game {
     this.models = new Map();
     this.race = null;
     this.raf = 0;
-    this.net = null;              // {role, link, view, remote, ...} when two up
+    this.net = null;              // {role, link/peers, lobby, view, ...} when networked
 
     this.camPos = new THREE.Vector3();
     this.camAim = new THREE.Vector3();
@@ -442,153 +443,394 @@ class Game {
       dom('two-host').classList.toggle('hidden', which !== 'host');
       dom('two-join').classList.toggle('hidden', which !== 'join');
     };
+    this.showTwo = show;
 
     dom('btn-two-back').onclick = () => {
-      this.net?.session?.cancel?.();
-      this.net = null;
+      this.endNet();
       dom('two').classList.add('hidden');
       dom('menu').classList.remove('hidden');
     };
     dom('btn-host').onclick = () => { show('host'); this.hostRace(); };
-    dom('btn-join').onclick = () => show('join');
-    dom('btn-connect').onclick = () => this.joinRace(dom('join-code').value.trim().toUpperCase());
-    dom('join-code').oninput = (e) => {
-      e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    };
-
-    // Each player's own level of help. The AI's difficulty is the host's, but
-    // how much the car drives itself is personal - which is the whole point
-    // when a parent and a five-year-old share a grid.
-    const el = dom('opt-help');
-    const labels = { easy: 'Lots', normal: 'Some', hard: 'None' };
-    el.innerHTML = '';
-    for (const key of Object.keys(DIFFICULTY)) {
-      const b = document.createElement('button');
-      b.className = 'pill';
-      b.textContent = labels[key] || DIFFICULTY[key].label;
-      b.classList.toggle('sel', key === (this.settings.help || 'easy'));
-      b.onclick = () => {
-        this.settings.help = key;
-        Settings.save(this.settings);
-        for (const c of el.children) c.classList.remove('sel');
-        b.classList.add('sel');
-      };
-      el.appendChild(b);
-    }
+    dom('btn-join').onclick = () => { show('join'); this.findRooms(); };
+    dom('btn-refresh').onclick = () => this.findRooms();
+    this.buildLobbyScreen();
   }
 
   showTwoPlayer() {
     dom('menu').classList.add('hidden');
     dom('two').classList.remove('hidden');
-    dom('two-pick').classList.remove('hidden');
-    dom('two-host').classList.add('hidden');
-    dom('two-join').classList.add('hidden');
-    dom('room-code').textContent = '----';
+    this.showTwo(null);
     dom('host-status').textContent = '';
     dom('join-status').textContent = '';
+    dom('room-list').innerHTML = '';
   }
 
+  // ------------------------------------------------------------------ lobby
+
+  /**
+   * Open a room and hold it, taking everybody who knocks.
+   *
+   * The race no longer starts when somebody connects - that was the whole of
+   * two-player multiplayer, and it left nowhere to choose a car or agree on a
+   * circuit. What a connection does now is fill a seat in the lobby.
+   */
   async hostRace() {
     const status = dom('host-status');
     try {
       const net = await this.netModule();
       const session = await net.host((s) => { status.textContent = `${s}…`; });
-      this.net = { role: 'host', session };
-      dom('room-code').textContent = session.code;
-      status.textContent = 'Waiting for the other player…';
-
-      const link = await session.waitForGuest;
-      this.net.link = link;
-      status.textContent = 'Connected. Starting…';
-
-      link.onMessage((msg) => {
-        if (!this.net) return;
-        this.net.lastHeard = performance.now() / 1000;
-        if (msg.t === MSG.HELLO) this.beginHosted(link, msg);
-        else if (msg.t === MSG.INPUT) this.net.remote?.receive(msg.b, msg.q);
+      this.net = { role: 'host', session, peers: new Map() };
+      const lobby = new Lobby({
+        room: session.room,
+        cars: this.racerSpecs.map((c) => c.id),
+        settings: {
+          track: this.settings.track,
+          laps: this.settings.laps,
+          difficulty: this.settings.difficulty,
+          physics: this.settings.physics,
+          help: this.settings.help || 'easy',
+          ai: this.racerSpecs.length - 1,
+        },
+        onChange: () => this.pushLobby(),
       });
-      link.onClose = () => this.guestLeft();
+      this.net.lobby = lobby;
+      lobby.seatHost(this.settings.car);
+      this.net.me = 'p1';
+      session.onGuest((link) => this.guestArrived(link));
+      this.showLobby();
     } catch (err) {
       status.textContent = `${err.message}. Try again, or race on your own.`;
-      this.net = null;
+      this.endNet();
     }
   }
 
-  async joinRace(code) {
+  /** Host: somebody knocked. Seat them, or turn them away. */
+  guestArrived(link) {
+    const lobby = this.net?.lobby;
+    if (!lobby) { link.close?.(); return; }
+    // Greet every connection with the lobby *before* deciding whether to seat
+    // it: a guest that is only looking uses exactly this message as the advert
+    // in its list, and then closes. See `list` in net/peer.js.
+    link.send(lobby.message());
+    let player = null;
+    link.onMessage((msg) => {
+      if (!this.net?.lobby) return;
+      const peer = player && this.net.peers.get(player.id);
+      if (peer) peer.lastHeard = performance.now() / 1000;
+      if (msg.t === MSG.JOIN && !player) {
+        player = lobby.add(link, msg.car);
+        if (!player) { link.send({ t: MSG.BYE, why: 'full' }); link.close?.(); return; }
+        this.net.peers.set(player.id, {
+          link, input: new RemoteInput(), lastHeard: performance.now() / 1000,
+        });
+        link.send({ ...lobby.message(), you: player.id });
+        this.pushLobby();
+      } else if (msg.t === MSG.INPUT && player) {
+        this.net.peers.get(player.id)?.input.receive(msg.b, msg.q);
+      } else if (player) {
+        lobby.receive(player.id, msg);
+      }
+    });
+    link.onClose = () => { if (player) this.playerLeft(player.id); };
+  }
+
+  /** Send the lobby to everybody, and redraw it here. */
+  pushLobby() {
+    const lobby = this.net?.lobby;
+    if (!lobby) return;
+    const msg = lobby.message();
+    for (const [id, peer] of this.net.peers) peer.link.send({ ...msg, you: id });
+    this.net.state = msg;
+    this.drawLobby();
+  }
+
+  /** Knock on every room and show whoever answers. */
+  async findRooms() {
     const status = dom('join-status');
-    if (!code || code.length < 4) { status.textContent = 'Four letters, please.'; return; }
+    const list = dom('room-list');
+    list.innerHTML = '';
+    status.textContent = 'Looking for games…';
     try {
       const net = await this.netModule();
-      status.textContent = 'Connecting…';
-      const link = await net.join(code, (s) => { status.textContent = `${s}…`; });
-      this.net = { role: 'guest', link };
-      status.textContent = 'Connected. Waiting for the host…';
-
-      link.onMessage((msg) => {
-        if (!this.net) return;
-        this.net.lastHeard = performance.now() / 1000;
-        if (msg.t === MSG.START) this.beginJoined(link, msg);
-        else if (msg.t === MSG.SNAP) this.net.view?.receive(msg, performance.now() / 1000);
-      });
-      link.onClose = () => this.hostLeft();
-      link.send({ t: MSG.HELLO, car: this.settings.car, help: this.settings.help || 'easy' });
+      let found = 0;
+      const close = await net.list(({ room, link, hello }) => {
+        found++;
+        list.appendChild(this.roomRow(room, hello, () => {
+          this.net.closeProbes?.(room);
+          this.joinRoom(link);
+        }));
+      }, () => {});
+      this.net = { role: 'guest', closeProbes: close };
+      status.textContent = found
+        ? `${found} game${found > 1 ? 's' : ''} - tap one to join`
+        : 'No games found. Ask them to press HOST A RACE, then look again.';
     } catch (err) {
       status.textContent = `${err.message}.`;
-      this.net = null;
+      this.endNet();
     }
   }
 
-  /** Host: the guest has said hello, so pick cars and start everybody. */
-  beginHosted(link, hello) {
-    const hostCar = this.settings.car;
-    // Two people cannot drive the same car. The guest asked for one; if it is
-    // taken they get the first that is not.
-    let guestCar = hello.car;
-    if (guestCar === hostCar || !this.racerSpecs.some((c) => c.id === guestCar)) {
-      guestCar = this.racerSpecs.find((c) => c.id !== hostCar).id;
-    }
-    const start = {
-      t: MSG.START,
-      track: this.settings.track,
-      laps: this.settings.laps,
-      physics: this.settings.physics,
-      difficulty: this.settings.difficulty,
-      quality: this.settings.quality,
-      hostCar,
-      guestCar,
-      guestHelp: hello.help || 'easy',
-    };
-    link.send(start);
-    this.net.start = start;
-    this.net.remote = new RemoteInput();
-    this.startRace(start);
+  /** One line in the found-games list. */
+  roomRow(room, hello, onPick) {
+    const b = document.createElement('button');
+    b.className = 'room';
+    const players = hello?.players?.length || 1;
+    const hostCar = this.racerSpecs.find((c) => c.id === hello?.players?.[0]?.car);
+    b.innerHTML = `<span class="rname">Room ${room}</span>
+      ${hostCar ? `<span class="chip" style="background:${hostCar.colour}">${hostCar.number}</span>
+                   <span class="cname">${hostCar.name}</span>` : ''}
+      <span class="rwho">${players} player${players > 1 ? 's' : ''}</span>`;
+    b.onclick = onPick;
+    return b;
+  }
+
+  /** Guest: take the seat on a link the probe already opened. */
+  joinRoom(link) {
+    this.net = { role: 'guest', link };
+    link.onMessage((msg) => {
+      if (!this.net) return;
+      this.net.lastHeard = performance.now() / 1000;
+      if (msg.t === MSG.LOBBY) {
+        if (msg.you) this.net.me = msg.you;
+        this.net.state = msg;
+        this.showLobby();
+      } else if (msg.t === MSG.START) this.beginJoined(msg);
+      else if (msg.t === MSG.SNAP) this.net.view?.receive(msg, performance.now() / 1000);
+      else if (msg.t === MSG.BYE) {
+        dom('join-status').textContent = 'That game is full.';
+        this.endNet();
+        this.showTwoPlayer();
+      }
+    });
+    link.onClose = () => this.hostLeft();
+    link.send({ t: MSG.JOIN, car: this.settings.car });
   }
 
   /** Guest: the host has sent the grid, so match it and go. */
-  async beginJoined(link, start) {
+  async beginJoined(start) {
     this.net.start = start;
     if (start.track !== this.settings.track) {
-      dom('join-status').textContent = `Loading ${start.track}…`;
+      dom('lobby-hint').textContent = 'Loading the circuit…';
       await this.loadTrackById(start.track);
     }
     this.startRace(start);
   }
 
-  guestLeft() {
+  /** Host: a seat emptied. In the lobby they vanish; in a race an AI takes over. */
+  playerLeft(id) {
     if (!this.net || this.net.role !== 'host') return;
-    const car = this.race?.humans.find((c) => c.spec.id === this.net.start?.guestCar);
-    this.race?.abandon(car);
-    this.stopPump();
-    this.net.link?.close?.();
-    this.net = null;                  // the rest of the race is single-player
+    const peer = this.net.peers.get(id);
+    peer?.link?.close?.();
+    this.net.peers.delete(id);
+    const seat = this.net.lobby?.players.find((p) => p.id === id);
+    if (this.race && seat) {
+      const car = this.race.humans.find((c) => c.spec.id === seat.car);
+      this.race.abandon(car);
+    }
+    this.net.lobby?.remove(id);
+    if (!this.race && this.net.peers.size === 0) this.drawLobby();
   }
 
   hostLeft() {
     if (!this.net || this.net.role !== 'guest') return;
     this.stopPump();
-    this.net = null;
-    this.toMenu();
-    dom('menu-track').textContent = 'The other player left the race';
+    this.endNet();
+    if (this.race) {
+      this.toMenu();
+      dom('menu-track').textContent = 'The host left the race';
+    } else {
+      dom('lobby').classList.add('hidden');
+      this.showTwoPlayer();
+      dom('join-status').textContent = 'The host closed the room.';
+    }
+  }
+
+  /**
+   * Wire the lobby once. It is the same screen for everybody.
+   *
+   * The host's controls are simply hidden from a guest rather than built
+   * differently, because both ends draw the same state and the difference is
+   * only who is allowed to change it - which is decided on the host anyway.
+   */
+  buildLobbyScreen() {
+    dom('btn-leave').onclick = () => {
+      this.endNet();
+      dom('lobby').classList.add('hidden');
+      this.showTwoPlayer();
+    };
+    dom('btn-ready').onclick = () => {
+      const me = this.net?.state?.players.find((p) => p.id === this.net.me);
+      this.net?.link?.send({ t: MSG.READY, ready: !me?.ready });
+    };
+    dom('btn-race').onclick = () => this.hostStartRace();
+
+    const lobby = () => this.net?.lobby;
+    this.pillGroup(dom('lobby-laps'), LAP_CHOICES, (v) => `${v}`,
+      () => lobby()?.settings.laps, (v) => lobby()?.set('laps', v));
+    this.pillGroup(dom('lobby-difficulty'), Object.keys(DIFFICULTY),
+      (v) => DIFFICULTY[v].label,
+      () => lobby()?.settings.difficulty, (v) => lobby()?.set('difficulty', v));
+    this.pillGroup(dom('lobby-physics'), Object.keys(PHYSICS), (v) => PHYSICS[v].label,
+      () => lobby()?.settings.physics, (v) => lobby()?.set('physics', v));
+    // How much the car drives itself. One level for the whole grid: the host's.
+    const help = { easy: 'Lots', normal: 'Some', hard: 'None' };
+    this.pillGroup(dom('lobby-help'), Object.keys(DIFFICULTY), (v) => help[v],
+      () => lobby()?.settings.help, (v) => lobby()?.set('help', v));
+  }
+
+  /**
+   * A row of pills that reads its selection from a getter.
+   *
+   * The options screen builds its rows the same way (`buildToggles`); this is
+   * that helper lifted out so the lobby can use it rather than growing a
+   * second copy that drifts.
+   */
+  pillGroup(el, values, label, current, onPick) {
+    el.innerHTML = '';
+    for (const v of values) {
+      const b = document.createElement('button');
+      b.className = 'pill';
+      b.dataset.value = v;
+      b.textContent = label(v);
+      b.onclick = () => onPick(v);
+      el.appendChild(b);
+    }
+    el.dataset.bound = '1';
+    this._pillRows = this._pillRows || [];
+    this._pillRows.push({ el, current });
+  }
+
+  showLobby() {
+    dom('two').classList.add('hidden');
+    dom('menu').classList.add('hidden');
+    dom('lobby').classList.remove('hidden');
+    this.drawLobby();
+  }
+
+  /** Draw whatever the lobby state says - ours if we host it, the host's if not. */
+  drawLobby() {
+    const state = this.net?.role === 'host' ? this.net.lobby?.message() : this.net?.state;
+    if (!state) return;
+    if (this.net.role === 'host') this.net.state = state;
+    const host = this.net.role === 'host';
+    const me = this.net.me;
+    dom('lobby-room').textContent = state.room;
+
+    dom('lobby-players').innerHTML = state.players.map((p) => {
+      const spec = this.racerSpecs.find((c) => c.id === p.car);
+      return `<li class="${p.id === me ? 'me' : ''}">
+        <span class="chip" style="background:${spec?.colour || '#666'}">${spec?.number || '?'}</span>
+        <span class="pwho">${spec?.name || p.car}</span>
+        <span class="ptag">${p.host ? 'HOST' : ''}${p.id === me ? ' YOU' : ''}</span>
+        <span class="${p.ready ? 'pready' : 'pwait'}">${p.ready ? '✓' : '…'}</span></li>`;
+    }).join('');
+
+    // Cars somebody else has are shown but cannot be taken.
+    const taken = new Set(state.players.filter((p) => p.id !== me).map((p) => p.car));
+    const mine = state.players.find((p) => p.id === me)?.car;
+    dom('lobby-cars').innerHTML = '';
+    for (const spec of this.racerSpecs) {
+      const b = document.createElement('button');
+      b.className = 'card';
+      b.dataset.car = spec.id;
+      b.disabled = taken.has(spec.id);
+      b.classList.toggle('sel', spec.id === mine);
+      b.innerHTML = `<span class="chip" style="background:${spec.colour}">${spec.number}</span>
+                     <span class="cname">${spec.name}</span>`;
+      b.onclick = () => this.pickLobbyCar(spec.id);
+      dom('lobby-cars').appendChild(b);
+    }
+
+    dom('lobby-host').classList.toggle('hidden', !host);
+    dom('btn-ready').classList.toggle('hidden', host);
+    dom('btn-race').classList.toggle('hidden', !host);
+    if (host) {
+      this.syncLobbyTrack(state.settings.track);
+      this.syncAiPills();
+      for (const row of this._pillRows || []) {
+        const now = row.current();
+        for (const b of row.el.children) b.classList.toggle('sel', b.dataset.value == now);
+      }
+      dom('btn-race').disabled = !state.canStart;
+      dom('lobby-hint').textContent = state.canStart
+        ? 'Everybody is ready.'
+        : state.players.length < 2 ? 'Waiting for somebody to join…'
+                                   : 'Waiting for everybody to press READY…';
+    } else {
+      const ready = state.players.find((p) => p.id === me)?.ready;
+      dom('btn-ready').textContent = ready ? 'READY ✓' : 'READY';
+      dom('btn-ready').classList.toggle('on', !!ready);
+      dom('lobby-hint').textContent = ready ? 'Waiting for the host to start…'
+                                            : 'Pick a car, then press READY.';
+    }
+  }
+
+  pickLobbyCar(id) {
+    if (this.net?.role === 'host') {
+      const seat = this.net.lobby.players.find((p) => p.host);
+      const free = this.net.lobby.freeCar(id);
+      if (free !== id) return;              // somebody else has it
+      seat.car = id;
+      this.settings.car = id;
+      Settings.save(this.settings);
+      this.net.lobby.changed();
+    } else {
+      this.net?.link?.send({ t: MSG.PICK, car: id });
+    }
+  }
+
+  /** The host's circuit and AI-count rows, which depend on state to build. */
+  syncLobbyTrack(current) {
+    const wrap = dom('lobby-track');
+    if (!wrap.children.length) {
+      for (const spec of this.trackSpecs) {
+        const b = document.createElement('button');
+        b.className = 'card track';
+        b.dataset.track = spec.id;
+        b.innerHTML = `<span class="tname">${spec.short}</span>`;
+        b.onclick = () => this.net?.lobby?.set('track', spec.id);
+        wrap.appendChild(b);
+      }
+    }
+    for (const b of wrap.children) b.classList.toggle('sel', b.dataset.track === current);
+  }
+
+  /**
+   * How many AI to fill the grid with.
+   *
+   * The choices depend on how many people are in - the field can never be
+   * more cars than there are pit boxes - so this row is rebuilt rather than
+   * just re-selected.
+   */
+  syncAiPills() {
+    const lobby = this.net.lobby;
+    const max = lobby.maxAi;
+    const choices = [0, 2, 4, 6, 10, max].filter((v, i, a) => v <= max && a.indexOf(v) === i);
+    const el = dom('lobby-ai');
+    el.innerHTML = '';
+    for (const v of choices) {
+      const b = document.createElement('button');
+      b.className = 'pill';
+      b.textContent = `${v}`;
+      b.classList.toggle('sel', v === lobby.settings.ai);
+      b.onclick = () => lobby.set('ai', v);
+      el.appendChild(b);
+    }
+  }
+
+  /** Host: everybody is green, so send the grid and go. */
+  hostStartRace() {
+    const lobby = this.net?.lobby;
+    if (!lobby?.canStart) return;
+    const start = lobby.startMessage();
+    for (const [, peer] of this.net.peers) peer.link.send(start);
+    this.net.start = start;
+    dom('lobby').classList.add('hidden');
+    if (start.track !== this.settings.track) {
+      this.loadTrackById(start.track).then(() => this.startRace(start));
+    } else {
+      this.startRace(start);
+    }
   }
 
   // --------------------------------------------------------------- museum
@@ -791,15 +1033,20 @@ class Game {
     const hz = net.role === 'host' ? SNAPSHOT_HZ : INPUT_HZ;
     net.pump = setInterval(() => {
       if (this.net !== net || !this.race) return;
-      // Noticing the other phone has gone belongs on this clock too. In the
-      // render loop it was as late as the frame rate, which on the device most
-      // likely to lose its connection is the frame rate least able to say so.
-      if (net.lastHeard && performance.now() / 1000 - net.lastHeard > DROP_AFTER) {
-        if (net.role === 'host') this.guestLeft(); else this.hostLeft();
-        return;
+      // Noticing that a phone has gone belongs on this clock too. In the render
+      // loop it was as late as the frame rate, which on the device most likely
+      // to lose its connection is the frame rate least able to say so.
+      const now = performance.now() / 1000;
+      if (net.role === 'host') {
+        const snap = snapshot(this.race);
+        for (const [id, peer] of [...net.peers]) {
+          if (now - peer.lastHeard > DROP_AFTER) { this.playerLeft(id); continue; }
+          peer.link.send(snap);
+        }
+      } else {
+        if (net.lastHeard && now - net.lastHeard > DROP_AFTER) { this.hostLeft(); return; }
+        net.link?.send({ t: MSG.INPUT, b: packButtons(this.input.state), q: net.seq++ });
       }
-      if (net.role === 'host') net.link?.send(snapshot(this.race));
-      else net.link?.send({ t: MSG.INPUT, b: packButtons(this.input.state), q: net.seq++ });
     }, 1000 / hz);
   }
 
@@ -813,6 +1060,8 @@ class Game {
     if (!this.net) return;
     this.stopPump();
     this.net.session?.cancel?.();
+    this.net.closeProbes?.();
+    for (const [, peer] of this.net.peers || []) peer.link?.close?.();
     this.net.link?.close?.();
     this.net = null;
   }
@@ -915,41 +1164,46 @@ class Game {
     this.goFullscreen();
     this.input.reset();
 
-    // Racers only. The props are placed - and shown - by the pit lane.
-    for (const spec of this.racerSpecs) this.models.get(spec.id).object.visible = true;
-
-    const entries = this.racerSpecs.map((spec) => ({
-      spec,
-      object: this.models.get(spec.id).object,
+    // The field. In a race off the wire it is exactly the list the host sent -
+    // people first, then however many AI were asked for - because with a grid
+    // that is no longer *every* car, "both devices lay out the same grid" needs
+    // the list to travel and not just the settings.
+    const fieldIds = start ? start.field : this.racerSpecs.map((c) => c.id);
+    for (const spec of this.racerSpecs) {
+      this.models.get(spec.id).object.visible = fieldIds.includes(spec.id);
+    }
+    const entries = fieldIds.map((id) => ({
+      spec: this.racerSpecs.find((c) => c.id === id),
+      object: this.models.get(id).object,
     }));
 
     let race;
     if (start) {
-      // Everything about the grid comes off the wire, in a fixed order, so the
-      // two devices lay out the same cars in the same slots.
-      const humans = [start.hostCar, start.guestCar];
-      const mine = this.net.role === 'host' ? start.hostCar : start.guestCar;
+      const humans = start.humans.map((h) => h.car);
+      const seat = start.humans.find((h) => h.id === this.net.me) || start.humans[0];
+      const mine = seat.car;
       race = new Race(this.track, entries, {
         difficulty: start.difficulty, laps: start.laps,
         physics: start.physics, car: mine,
       }, this.trackSpec().gridLanes).build(mine, humans);
 
-      const hostCar = race.humans.find((c) => c.spec.id === start.hostCar);
-      const guestCar = race.humans.find((c) => c.spec.id === start.guestCar);
-      race.setAssist(hostCar, this.net.role === 'host'
-        ? (this.settings.help || 'easy') : (start.hostHelp || 'easy'));
-      race.setAssist(guestCar, this.net.role === 'host'
-        ? start.guestHelp : (this.settings.help || 'easy'));
+      // One level of help for the whole grid, the host's - it travels in the
+      // start message like everything else about the race.
+      for (const car of race.humans) race.setAssist(car, start.help || 'easy');
 
       if (this.net.role === 'host') {
-        race.inputs.set(guestCar, this.net.remote);
-        this.net.sinceSnap = 0;
+        // Every remote player's buttons arrive on their own link and are
+        // applied where a local player's would be.
+        for (const [id, peer] of this.net.peers) {
+          const car = race.humans.find((c) => c.spec.id ===
+            start.humans.find((h) => h.id === id)?.car);
+          if (car) race.inputs.set(car, peer.input);
+        }
       } else {
-        // The guest runs no AI and no race logic of its own - it predicts its
+        // A guest runs no AI and no race logic of its own - it predicts its
         // own car and is told about everything else.
         race.driverAidFor = (car, dt) => driverAid(car, car.lift ?? 0, dt, race.field);
         this.net.view = new GuestView(race);
-        this.net.sinceInput = 0;
         this.net.seq = 0;
       }
       this.hud.setLaps(start.laps);

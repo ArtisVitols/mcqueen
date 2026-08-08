@@ -1,10 +1,14 @@
 /**
- * Race the same grid on two machines and check they agree.
+ * Race the same grid on three machines and check they agree.
  *
- * A host `Race` and a guest `GuestView` run in one process against the fake
+ * A host `Race` and two guest `GuestView`s run in one process against the fake
  * transport, at latencies and packet loss you would actually see on a phone.
- * No browser, no broker, no second device - so this can run on every change,
+ * No browser, no broker, no other device - so this can run on every change,
  * which is the only way netplay stays working.
+ *
+ * Three ends rather than two because the lobby holds four: a host that
+ * broadcasts to a list is a different thing from one that sends to a link, and
+ * the way that fails is one guest getting somebody else's answer.
  *
  * What it asserts:
  *   - both ends finish, and agree on the order
@@ -35,7 +39,8 @@ const CARS = read('assets/cars.json').cars.filter((c) => c.racer !== false);
 
 const DT = 1 / 120;
 const HOST_CAR = 'lightning_mcqueen';
-const GUEST_CAR = 'chick_hicks';
+const GUEST_CARS = ['chick_hicks', 'the_king'];
+const HUMANS = [HOST_CAR, ...GUEST_CARS];
 
 /** Buttons that vary, so the two ends have something to disagree about. */
 function scripted(seed, gasOnly = false) {
@@ -77,70 +82,89 @@ function build(trackId, physics, difficulty) {
   const mk = (localId) => {
     const track = new Track(JSON.parse(JSON.stringify(data)));
     const entries = CARS.map((c) => ({ spec: c, object: new THREE.Object3D() }));
-    const race = new Race(track, entries, { difficulty, laps: 2, physics, car: localId },
-      spec.gridLanes).build(localId, [HOST_CAR, GUEST_CAR]);
-    return race;
+    return new Race(track, entries, { difficulty, laps: 2, physics, car: localId },
+      spec.gridLanes).build(localId, HUMANS);
   };
-  return { host: mk(HOST_CAR), guest: mk(GUEST_CAR) };
+  return { host: mk(HOST_CAR), guests: GUEST_CARS.map(mk) };
 }
 
 function run({ track, physics, difficulty, latency, jitter, loss }) {
-  const { host, guest } = build(track, physics, difficulty);
+  const { host, guests } = build(track, physics, difficulty);
   const rng = makeRng(0xc0ffee);
-  const link = new FakeLink({ latency, jitter, loss, rng });
-
-  // The host applies the guest's buttons wherever they have got to.
-  const remote = new RemoteInput();
-  const guestCarOnHost = host.humans.find((c) => c.spec.id === GUEST_CAR);
-  host.inputs.set(guestCarOnHost, remote);
-  // Everything the guest predicts locally has to see the same aid the host
-  // applies, or the two disagree by construction.
-  guest.driverAidFor = (car, dt) => driverAid(car, car.lift ?? 0, dt, guest.field);
-
-  const view = new GuestView(guest);
   const hostInput = scripted(1);
-  const guestInput = scripted(2);
 
-  link.a.onMessage((msg) => {
-    if (msg.t === MSG.INPUT) remote.receive(msg.b, msg.q);
-  });
-  link.b.onMessage((msg) => {
-    if (msg.t === MSG.SNAP) view.receive(msg, link.now);
+  // One end each. The host holds a list and broadcasts to it, which is the
+  // thing this file is here to check now: every guest gets its own link, its
+  // own buttons and its own view.
+  const seats = guests.map((guest, i) => {
+    const link = new FakeLink({ latency, jitter, loss, rng });
+    const remote = new RemoteInput();
+    const carOnHost = host.humans.find((c) => c.spec.id === GUEST_CARS[i]);
+    host.inputs.set(carOnHost, remote);
+    // Everything a guest predicts locally has to see the same aid the host
+    // applies, or the two disagree by construction.
+    guest.driverAidFor = (car, dt) => driverAid(car, car.lift ?? 0, dt, guest.field);
+    const seat = {
+      id: GUEST_CARS[i], guest, link, remote, carOnHost,
+      view: new GuestView(guest), input: scripted(2 + i), seq: 0,
+      worst: 0, total: 0, samples: 0, outside: 0,
+    };
+    link.a.onMessage((msg) => { if (msg.t === MSG.INPUT) remote.receive(msg.b, msg.q); });
+    link.b.onMessage((msg) => { if (msg.t === MSG.SNAP) seat.view.receive(msg, link.now); });
+    return seat;
   });
 
   let t = 0;
   let sinceSnap = 0;
   let sinceInput = 0;
-  let seq = 0;
-  let worst = 0;          // guest's own car vs the host's authority, metres
-  let total = 0;          // ... summed, for the sustained offset
-  let samples = 0;
-  let outside = 0;        // frames the guest drew a car off the road
   const st = {};
 
   while (host.state !== State.FINISHED && t < 600) {
     hostInput.tick(DT);
-    guestInput.tick(DT);
+    for (const seat of seats) seat.input.tick(DT);
 
     host.update(DT, hostInput);
-    view.update(DT, guestInput, link.now);
+    for (const seat of seats) seat.view.update(DT, seat.input, seat.link.now);
     t += DT;
 
     sinceSnap += DT;
-    if (sinceSnap >= 1 / SNAPSHOT_HZ) {
-      sinceSnap = 0;
-      link.b.other.send(snapshot(host));      // host end -> guest
-    }
+    const snap = sinceSnap >= 1 / SNAPSHOT_HZ;
+    if (snap) sinceSnap = 0;
     sinceInput += DT;
-    if (sinceInput >= 1 / INPUT_HZ) {
-      sinceInput = 0;
-      link.a.other.send({ t: MSG.INPUT, b: packButtons(guestInput.state), q: seq++ });
+    const inputDue = sinceInput >= 1 / INPUT_HZ;
+    if (inputDue) sinceInput = 0;
+    for (const seat of seats) {
+      if (snap) seat.link.b.other.send(snapshot(host));       // host end -> guest
+      if (inputDue) {
+        seat.link.a.other.send(
+          { t: MSG.INPUT, b: packButtons(seat.input.state), q: seat.seq++ });
+      }
+      seat.link.step(DT);
     }
-    link.step(DT);
 
-    // How far apart are the two versions of the guest's own car?
+    for (const seat of seats) measure(seat, host, st);
+  }
+
+  const worst = Math.max(...seats.map((s2) => s2.worst));
+  const mean = seats.reduce((a, s2) => a + (s2.samples ? s2.total / s2.samples : 0), 0)
+             / seats.length;
+  const outside = seats.reduce((a, s2) => a + s2.outside, 0);
+  const dropped = seats.reduce((a, s2) => a + s2.link.dropped, 0);
+
+  return {
+    finished: host.state === State.FINISHED,
+    order: host.order.map((c) => c.spec.id),
+    guestOrders: seats.map((s2) => s2.guest.order.map((c) => c.spec.id)),
+    hostTimes: host.order.map((c) => +(c.finishTime || 0).toFixed(2)),
+    worst, mean, outside, dropped, seconds: t,
+  };
+}
+
+/** One guest's disagreement with the host, this step. */
+function measure(seat, host, st) {
+    const guest = seat.guest;
     const mine = guest.player;
-    const truth = host.field.find((c) => c.spec.id === GUEST_CAR);
+    const truth = host.field.find((c) => c.spec.id === seat.id);
     // Measured in the *world*, not along the lap.
     //
     // `s` is only comparable while both ends are on the same ribbon: in the
@@ -150,12 +174,10 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
     // am driving from where the host says it is - and it asks it the same way
     // on either road.
     const drift = mine.position.distanceTo(truth.position);
-    if (host.state === State.RACING) { worst = Math.max(worst, drift); total += drift; samples++; }
-    if (process.env.TRACE && Math.floor(t * 2) !== Math.floor((t - DT) * 2)) {
-      console.log(`  t=${t.toFixed(1)} state=${host.state} drift=${drift.toFixed(2)} ` +
-        `guestS=${mine.s.toFixed(0)} hostS=${truth.s.toFixed(0)} ` +
-        `gSpd=${(mine.speed*3.6).toFixed(0)} hSpd=${(truth.speed*3.6).toFixed(0)} ` +
-        `gState=${guest.state}`);
+    if (host.state === State.RACING) {
+      seat.worst = Math.max(seat.worst, drift);
+      seat.total += drift;
+      seat.samples++;
     }
 
     for (const car of guest.field) {
@@ -166,22 +188,9 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
       const road = car.road || guest.track;
       road.sample(car.s, st);
       if (car.n > road.limit(st, 1) + 0.5 || car.n < road.limit(st, -1) - 0.5) {
-        outside++;
+        seat.outside++;
       }
     }
-  }
-
-  return {
-    finished: host.state === State.FINISHED,
-    order: host.order.map((c) => c.spec.id),
-    guestOrder: guest.order.map((c) => c.spec.id),
-    hostTimes: host.order.map((c) => +(c.finishTime || 0).toFixed(2)),
-    worst,
-    mean: samples ? total / samples : 0,
-    outside,
-    dropped: link.dropped,
-    seconds: t,
-  };
 }
 
 const CASES = [
@@ -191,8 +200,8 @@ const CASES = [
   { label: 'poor 4G',     latency: 0.150, jitter: 0.060, loss: 0.05 },
 ];
 
-console.log('Host and guest race the same grid in one process, over a faked link.');
-console.log('"offset" is how far the guest\'s own car sits from the host\'s answer on');
+console.log('A host and two guests race the same grid in one process, over faked links.');
+console.log('"offset" is how far a guest\'s own car sits from the host\'s answer on');
 console.log('average - the standing cost of predicting - and "peak" the worst moment,');
 console.log('which is a correction being folded in. They fail for different reasons, so');
 console.log('they are checked separately.\n');
@@ -231,7 +240,7 @@ for (const c of CASES) {
     // netcode can resolve them: the question genuinely has no answer at that
     // resolution. What must never happen is the ends disagreeing about a place
     // that was actually *decided*, and that is what this checks.
-    const agree = orderAgrees(r.order, r.guestOrder, r.hostTimes, 2 * c.latency);
+    const agree = r.guestOrders.every((o) => orderAgrees(r.order, o, r.hostTimes, 2 * c.latency));
     // Prediction costs a round trip of position by construction: the guest
     // applies a button now, the host applies it one latency later, and the
     // snapshot correcting for it is another latency old. That much is the
@@ -260,14 +269,14 @@ for (const c of CASES) {
     }
     if (r.outside > 0) { console.log(`    ! the guest drew a car off the road ${r.outside} times`); failed++; }
     if (!agree) {
-      console.log('    ! the two ends disagree about a place that was decided');
+      console.log('    ! the ends disagree about a place that was decided');
       console.log(`      host:  ${r.order.join(' ')}`);
-      console.log(`      guest: ${r.guestOrder.join(' ')}`);
+      for (const o of r.guestOrders) console.log(`      guest: ${o.join(' ')}`);
       console.log(`      host finish times: ${r.hostTimes.join(' ')}`);
       failed++;
     }
   }
 }
 
-console.log(failed ? `\n${failed} problem(s)` : '\nboth ends agree at every latency');
+console.log(failed ? `\n${failed} problem(s)` : '\nall three ends agree at every latency');
 process.exit(failed ? 1 : 0);
