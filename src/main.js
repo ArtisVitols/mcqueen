@@ -13,6 +13,8 @@ import { GuestView } from './net/guest.js';
 import { Lobby } from './net/lobby.js';
 import { Museum } from './museum.js';
 import { PitCrew } from './pitcrew.js';
+import { Smoke, smokeFor } from './smoke.js';
+import { skyTexture } from './sky.js';
 
 const dom = (id) => document.getElementById(id);
 
@@ -154,9 +156,20 @@ class Game {
     this.renderer = renderer;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x8fc4ee);
+    // Clouds rather than a flat blue. Drawn into a canvas once and used as the
+    // background, which costs one full-screen pass and nothing per frame - see
+    // src/sky.js for why it is not billboards.
+    scene.background = skyTexture(7, '#9ecbf0');
     scene.fog = new THREE.Fog(0x9ecbf0, 260, q.fog);
     this.scene = scene;
+
+    // Tyre smoke and a wreck's engine. One pooled Points for the whole race.
+    // Low quality halves both the pool and the rate it is filled at: it is the
+    // setting for a phone that is already working, and smoke is the first
+    // thing that should give way.
+    this.smokeQuality = q.shadows ? 1 : 0.5;
+    this.smoke = new Smoke(q.shadows ? 320 : 160);
+    scene.add(this.smoke.points);
 
     this.camera = new THREE.PerspectiveCamera(62, 2, 0.6, 3200);
     scene.add(this.camera);
@@ -194,6 +207,8 @@ class Game {
 
   resize() {
     const w = innerWidth, h = innerHeight;
+    // Point size is in pixels, so the puffs have to follow the buffer.
+    this.smoke?.resize(h * this.renderer.getPixelRatio());
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -1432,7 +1447,15 @@ class Game {
       }
     }
 
-    for (const car of race.field) car.model.userData.wheels?.update(car, dt);
+    for (const car of race.field) {
+      car.model.userData.wheels?.update(car, dt);
+      // Smoke is drawn from state every car already carries - `slip` is the
+      // same number the tyre squeal is mixed from, and `out` is on the wire -
+      // so a guest sees a rival's slide and a rival's wreck without anything
+      // extra being sent.
+      smokeFor(this.smoke, car, dt, this.smokeQuality);
+    }
+    this.smoke.update(dt);
 
     const player = race.player;
     this.placeCamera(player, 1 - Math.pow(0.0016, dt));

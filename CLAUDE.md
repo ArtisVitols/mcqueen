@@ -476,6 +476,46 @@ speed, steers the front pair and leans the body. Nothing re-exports a GLB -
   it is 40% too tall, and `check_ride_height` reported every car 17 cm into the
   road when nothing had moved. Same flag McQueen already needed.
 
+## Clouds and smoke
+
+Three cosmetic things, all generated rather than loaded - the same rule the
+audio has, and for the same reasons: zero bytes and zero licensing.
+`src/sky.js`, `src/smoke.js`, checked by `check_effects.mjs`.
+
+- **The sky is a canvas texture used as `scene.background`.** One full-screen
+  pass and *nothing* per frame: no geometry, no draw call per cloud, no sorting
+  against the fog. Billboards would have been the obvious answer and would cost
+  more than the cars do on the circuit that needs it most. The clouds sit in
+  the band the chase camera actually looks at - low, near the horizon - because
+  a cloud at the zenith is a cloud nobody sees, and they are drawn twice near
+  the seam because an equirectangular map wraps.
+- **A cloud needs a body and a soft rim, not a gradient from the middle.** One
+  radial stop reads as haze on the glass; three read as something with a shape.
+- **Smoke is one pooled `THREE.Points`** with a shader that works out a puff's
+  whole life from its birth time, so the per-frame cost is a single uniform and
+  a race where nobody is sliding costs nothing at all. Spawning writes four
+  numbers into a ring buffer; when it is full the oldest puff is overwritten,
+  which is right at a glance - what you notice is the smoke being made now.
+  `frustumCulled` is off and the bounding sphere is enormous, because the pool
+  is scattered over the whole circuit and a fitted sphere would blink the lot
+  in and out as one.
+- **The rate is per second, carried as a fractional debt on the car** - the
+  same rule as contact and tyre wear, so how much smoke there is does not
+  depend on the frame rate.
+- **It is drawn from state the cars already carry.** `car.slip` is the number
+  the tyre squeal is mixed from, so what you hear and what you see are the same
+  event, and `car.out` marks a wreck - both are already on the wire, so a guest
+  sees a rival's slide and a rival's engine without anything extra being sent.
+- **A dead engine's smoke is lighter than it "should" be**, because the thing
+  it has to be seen against is asphalt. Dark grey against dark grey is nothing.
+- **Photographing smoke needs the render loop stopped.** A puff lives about a
+  second and a SwiftShader frame *is* a second or three, so a screenshot taken
+  with the loop running catches an empty pool - which says nothing about how it
+  looks at 60 fps. `check_effects` pauses, spawns, draws one frame by hand and
+  shoots that.
+- Low quality halves the pool *and* the rate: it is the setting for a phone
+  that is already working, and smoke is the first thing that should give way.
+
 ## The museum
 
 **MUSEUM** on the main menu: a car on a lit plinth, drag to turn, pinch to
@@ -1097,6 +1137,7 @@ node tools/check_barriers.mjs      # walls inside the corridor, holes under the 
 node tools/check_wheels.mjs        # every wheel found, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
+node tools/check_effects.mjs       # clouds, tyre smoke, and a wreck cooking
 node tools/check_museum.mjs        # every car on the plinth, and the race after
 node tools/check_crashes.mjs       # rivals have incidents, and they are safe
 node tools/shots_crash.mjs <track> # ... and a picture of one at the roadside
@@ -1198,6 +1239,10 @@ What "good" looks like right now:
   outside the corridor, get shoved back onto the racing line, start on top of
   the player, be classified ahead of somebody who finished, or stop the race
   ending. Two cars out per race is the cap and it holds.
+- `check_effects.mjs` — the sky is a texture and not a flat colour; a clean lap
+  makes no smoke at all; a slide makes it; it clears afterwards; the pool never
+  exceeds its budget; and a wreck cooks on its own. Then the pictures, because
+  "there is smoke" and "it looks like smoke" are different claims.
 - `check_grid.mjs` — every slot on the racing surface: `Material.105` on Motor
   Speedway, `Material.227` on Palm Mile, `Asphalt` on Yoyleland. Anything else
   and somebody is starting in the pits - `Material.107` in particular *is* the

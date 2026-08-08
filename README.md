@@ -46,6 +46,14 @@ is what the longer race lengths are for. Staying out on dead tyres is not a
 free option: they lose grip *and* top speed, so the car that skips its stop
 comes back to you.
 
+## How it looks
+
+Clouds drift over the grandstands, cars that are being thrown about smoke their
+tyres, and a car that has crashed out sits at the roadside with its engine
+smoking. None of it is a downloaded file - the sky and the smoke are drawn by
+the game as it starts, the same way the engines are synthesised rather than
+sampled. On **Low** graphics there is less of it, on purpose.
+
 ## Incidents
 
 Now and then a rival gets it wrong, runs off the racing line and stops at the
@@ -235,6 +243,7 @@ node  tools/check_wheels.mjs       # every wheel found, and proof they turn
 node  tools/check_steering.mjs     # does it steer, and does the field weave?
 node  tools/check_racing.mjs       # how hard is it actually to overtake?
 node  tools/check_museum.mjs       # every car on the plinth, and the race after
+node  tools/check_effects.mjs      # clouds, tyre smoke, and a wreck cooking
 node  tools/check_crashes.mjs      # rivals have incidents, and they are safe
 node  tools/check_pits.mjs         # pit roads on asphalt, and a stop end to end
 node  tools/shots_pits.mjs yoyle   # ... and a picture of Guido doing it
