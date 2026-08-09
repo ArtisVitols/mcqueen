@@ -22,7 +22,9 @@ tap MULTIPLAYER instead - see below.
 - The wheels turn at road speed, the front pair steers, and the body leans into
   the corners and noses down under braking.
 - Turn the phone to landscape and it goes fullscreen; if the browser wants a
-  tap first, it asks for one.
+  tap first, it asks for one. **The phone's Back button gets you out of
+  landscape again** - it hands the screen back and pauses the race, rather than
+  leaving the game.
 
 ## Pit stops
 
@@ -262,7 +264,7 @@ node  tools/shots_pits.mjs yoyle   # ... and a picture of Guido doing it
 node  tools/check_grid.mjs         # what surface each starting slot sits on
 node  tools/check_barriers.mjs     # walls inside the corridor, holes under a wheel
 node  tools/test_pause.mjs         # the pause menu, and panels that fit a phone
-node  tools/check_fullscreen.mjs   # rotate to landscape, and the tap fallback
+node  tools/check_fullscreen.mjs   # landscape, the tap fallback, and Back
 node  tools/check_netplay.mjs      # a host and two guests agree, at four latencies
 node  tools/check_lobby.mjs        # four in a lobby, in one process
 node  tools/check_twoplayer.mjs    # three real tabs through the real menus

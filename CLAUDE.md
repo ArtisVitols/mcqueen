@@ -888,6 +888,30 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   the two surfaces look continuous. Yoyleland's lane needs no naming at all: it
   is 80 m of grass away and is found by shape.
 
+## Landscape, and giving the phone back
+
+Turning the phone sideways asks for fullscreen *and* locks the orientation, so
+a player who wants their phone back has to undo both. Back is the button they
+reach for, and by default it leaves the site and throws the race away.
+
+- **The Back gesture is borrowed with a history entry**, pushed by `guardBack`
+  on the way into fullscreen and popped instead of navigating. There is nothing
+  else to go back to in a single-page game, so that entry can only ever mean
+  "let go of the screen": `dropFullscreen` unlocks the orientation, exits
+  fullscreen and **pauses** - a race left running is a car driving into a wall
+  while its driver reads a message.
+- **Spend the entry if fullscreen ends some other way**, or the next Back is
+  swallowed doing nothing. `history.state?.mcqueen` is how it knows the entry
+  on top is the one it pushed and not somebody else's.
+- **RESUME takes the screen back.** Leaving fullscreen sets `offer = false` in
+  `watchOrientation` - deliberately, so dismissing the panel does not nag -
+  which means nothing would ask again until the phone is turned twice. A tap
+  on RESUME is a user gesture, so unlike a rotation it is allowed to succeed.
+- **Phones only, and `isPhone()` is the one test for it.** Every browser tool
+  in `tools/` drives a desktop viewport; a page that borrows history entries
+  under a test is a page one of them will eventually navigate away from
+  mid-race. Same guard the rotate overlay already used.
+
 ## The lobby
 
 **MULTIPLAYER** on the main menu, then HOST or JOIN. Up to **four people**
@@ -1250,7 +1274,7 @@ node tools/check_crashes.mjs       # rivals have incidents, and they are safe
 node tools/shots_crash.mjs <track> # ... and a picture of one at the roadside
 node tools/check_pits.mjs          # pit roads on asphalt, and a stop end to end
 node tools/shots_pits.mjs <track>  # ... and a picture of Guido doing it
-node tools/check_fullscreen.mjs    # rotate to landscape, and the tap fallback
+node tools/check_fullscreen.mjs    # landscape, the tap fallback, and Back
 node tools/check_netplay.mjs       # a host and two guests agree, at four latencies
 node tools/check_lobby.mjs         # four in a lobby, in one process
 node tools/check_twoplayer.mjs     # three real tabs through the real menus

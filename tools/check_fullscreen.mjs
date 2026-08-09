@@ -15,6 +15,8 @@
  *   granted   the panel must not linger once fullscreen actually happened
  *   refused   landscape offers the tap, the tap retries, and dismissing it
  *             does not nag again until the phone is turned
+ *   back      the phone's Back button hands the screen back instead of
+ *             leaving the site, and pauses whatever was being raced
  *
  *   node tools/check_fullscreen.mjs
  */
@@ -69,6 +71,11 @@ async function open({ phone, refuse }) {
       Object.defineProperty(document, 'fullscreenElement', { get: () => el });
       Element.prototype.requestFullscreen = function grant() {
         el = this;
+        document.dispatchEvent(new Event('fullscreenchange'));
+        return Promise.resolve();
+      };
+      document.exitFullscreen = () => {
+        el = null;
         document.dispatchEvent(new Event('fullscreenchange'));
         return Promise.resolve();
       };
@@ -164,6 +171,69 @@ console.log('\n=== phone, fullscreen refused: the tap is the fallback ===');
   const port = await state(page);
   port.nag ? ok('portrait goes back to the turn-your-phone nag')
            : fail(`portrait: ${JSON.stringify(port)}`);
+  await page.close();
+}
+
+console.log('\n=== phone: Back hands the screen back ===');
+{
+  const page = await open({ phone: true, refuse: false });
+  const start = page.url();
+  await turn(page, false);
+
+  // The entry has to be *ours*. Anything else on top of the stack and Back
+  // would navigate away from the game instead of leaving landscape.
+  const guard = await page.evaluate(() => history.state?.mcqueen);
+  guard === 'fullscreen' ? ok('going fullscreen borrows a history entry')
+                         : fail(`no guard entry (state=${JSON.stringify(guard)})`);
+
+  // A race, so there is something for Back to interrupt. It only has to exist
+  // - the countdown is a minute of wall clock at SwiftShader's frame rate and
+  // proves nothing this test is about.
+  await page.evaluate(() => document.getElementById('btn-start').click());
+  await page.waitForFunction('!!window.game?.race', { timeout: 600000, polling: 1000 })
+    .catch(() => fail('no race started'));
+
+  await page.goBack();
+  await sleep(400);
+  const out = await page.evaluate(() => ({
+    fs: !!document.fullscreenElement,
+    paused: !!window.game?.paused,
+    options: !document.getElementById('options').classList.contains('hidden'),
+    url: location.href,
+    panel: !document.getElementById('rotate').classList.contains('hidden'),
+  }));
+  out.url === start ? ok('still on the game, not the page before it')
+                    : fail(`Back left the site: ${out.url}`);
+  out.fs ? fail('Back did not leave fullscreen') : ok('Back leaves fullscreen');
+  out.paused && out.options ? ok('... and pauses the race, showing the pause menu')
+                            : fail(`race not paused: ${JSON.stringify(out)}`);
+  out.panel ? fail('the fullscreen nag reappeared over the pause menu')
+            : ok('no nag over the pause menu - letting go was a decision');
+
+  // Carrying on has to put it back, or the rest of the race is played behind
+  // the browser's own chrome with nothing left to ask for the screen.
+  await page.evaluate(() => document.getElementById('btn-resume').click());
+  await sleep(300);
+  const again = await page.evaluate(() => ({
+    fs: !!document.fullscreenElement,
+    paused: !!window.game?.paused,
+    guard: history.state?.mcqueen,
+  }));
+  again.fs && !again.paused && again.guard === 'fullscreen'
+    ? ok('RESUME takes the screen back and re-arms Back')
+    : fail(`resume: ${JSON.stringify(again)}`);
+  await page.close();
+}
+
+console.log('\n=== desktop: no history is borrowed ===');
+{
+  const page = await open({ phone: false, refuse: false });
+  const state0 = await page.evaluate(() => history.state?.mcqueen);
+  await page.evaluate(() => window.game?.goFullscreen?.());
+  const state1 = await page.evaluate(() => history.state?.mcqueen);
+  !state0 && !state1
+    ? ok('nothing pushed - every other browser test can still use Back')
+    : fail(`desktop pushed a guard entry (${state0} -> ${state1})`);
   await page.close();
 }
 

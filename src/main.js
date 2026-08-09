@@ -112,6 +112,7 @@ class Game {
     this.startIdleCamera();
     addEventListener('resize', () => this.resize());
     this.watchOrientation();
+    this.watchBack();
   }
 
   trackSpec(id = this.settings.track) {
@@ -240,8 +241,7 @@ class Game {
     // Phones only. On a desktop - and in headless Chrome, where every browser
     // test runs at a landscape viewport - a fullscreen nag over the menu is
     // both wrong and would swallow the clicks those tests make.
-    const phone = matchMedia('(hover: none) and (pointer: coarse)').matches
-                  && !!document.documentElement.requestFullscreen;
+    const phone = isPhone();
     let offer = phone;
     let wasPortrait = innerHeight > innerWidth;
 
@@ -1025,6 +1025,12 @@ class Game {
 
   resumeRace() {
     if (!this.race) return this.toMenu();
+    // Take the screen back. Leaving landscape drops the fullscreen offer until
+    // the phone is turned again (see `watchOrientation`), so without this a
+    // player who used Back and then carried on racing would spend the rest of
+    // the race behind the browser's chrome with no way to ask for the screen.
+    // This one is a tap, so unlike a rotation it is allowed to succeed.
+    if (isPhone()) this.goFullscreen();
     this.closePauseOverlay();
     dom('hud').classList.remove('hidden');
     dom('controls').classList.remove('hidden');
@@ -1518,7 +1524,77 @@ class Game {
     }
     // Android honours this; iOS ignores it, hence the rotate overlay.
     screen.orientation?.lock?.('landscape').catch(() => {});
+    this.guardBack();
   }
+
+  /**
+   * Make the phone's Back button a way out of landscape.
+   *
+   * Holding the screen means two things on Android - fullscreen, and an
+   * orientation lock - and a player who wants their phone back has to fight
+   * both. Back is the button they will reach for, and by default it either
+   * does nothing useful or leaves the site altogether, which throws away the
+   * race.
+   *
+   * A history entry is the standard way to borrow it: push one on the way into
+   * fullscreen, and the gesture pops that instead of navigating. There is
+   * nothing else to go back *to* in a single-page game, so the entry can only
+   * ever mean "let go of the screen".
+   */
+  guardBack() {
+    // Phones only, and for the same reason the rotate overlay is: there is no
+    // Back button on a desktop, and every browser test runs there. Borrowing
+    // history entries in a page that is being driven by a test is a good way
+    // to have one of them navigate away mid-race.
+    if (this.backGuard || !isPhone()) return;
+    this.backGuard = true;
+    history.pushState({ mcqueen: 'fullscreen' }, '');
+  }
+
+  /** Hand the phone back: no fullscreen, no orientation lock, race paused. */
+  dropFullscreen() {
+    screen.orientation?.unlock?.();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    // A race left running is a car driving into a wall while its driver is
+    // reading a message. The pause menu is already the "I need a moment"
+    // screen, so use it rather than inventing another.
+    this.pauseRace();
+  }
+
+  /**
+   * Keep the borrowed history entry in step with the screen.
+   *
+   * If fullscreen ends some other way - Escape, the browser's own gesture, the
+   * system - the entry we pushed is still sitting on the stack, and the next
+   * Back would be swallowed doing nothing. Spend it ourselves, but only when
+   * it is genuinely ours to spend: `history.state` says whether the entry on
+   * top is the one this pushed.
+   */
+  watchBack() {
+    addEventListener('popstate', () => {
+      // Unconditionally, even with no fullscreen to leave. iOS never grants it
+      // and refuses the orientation lock too, so there the entry was pushed
+      // for a screen that was never taken - and a borrowed Back that does
+      // nothing at all is worse than one that pauses.
+      this.backGuard = false;
+      this.dropFullscreen();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement || !this.backGuard) return;
+      this.backGuard = false;
+      if (history.state?.mcqueen === 'fullscreen') history.back();
+    });
+  }
+}
+
+/**
+ * A phone, as far as this game is concerned: a touch screen that can go
+ * fullscreen. Headless Chrome is neither, which is what keeps the rotate
+ * overlay and the Back-button guard out of every browser test.
+ */
+function isPhone() {
+  return matchMedia('(hover: none) and (pointer: coarse)').matches
+         && !!document.documentElement.requestFullscreen;
 }
 
 function ordinal(n) {
