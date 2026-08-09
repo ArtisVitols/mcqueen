@@ -540,7 +540,11 @@ for (const spec of todo) {
         entryS: +entryS.toFixed(3), exitS: +exitS.toFixed(3),
         lapSpan: +lapSpan.toFixed(3),
         length: +total.toFixed(3), stationStep: +stationStep.toFixed(6),
-        speedLimit: trackSpec.pitSpeed ?? 22,
+        // 30 m/s - about 110 km/h. Higher than a real pit road, deliberately:
+        // these lanes are 500-816 m long and a five-year-old should not spend
+        // most of a lap at walking pace. `pitSpeed` in tracks.json overrides
+        // it per circuit.
+        speedLimit: trackSpec.pitSpeed ?? 30,
         boxes,
         ...out,
       },

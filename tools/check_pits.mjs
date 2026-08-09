@@ -399,11 +399,50 @@ for (const spec of todo) {
   // The biggest wave of turn-ins inside one lap's worth of time.
   let wave = 0;
   const joined = [];
+  // **What a car does with the rest of its race**, which is the half of a pit
+  // stop nothing here used to look at. Three separate defects all showed as
+  // "slow" and all were invisible to every assertion above: the AI's pit speed
+  // cap was never cleared after a stop, so a rival aimed at the pit limit from
+  // its stop to the flag; the cap was released on the field-wide entry window
+  // rather than the car's own, so one that could no longer pit crawled a
+  // quarter of a lap on the racing line; and the queue rule treated every car
+  // ahead as parked, so the whole lane ran at a third of its limit.
+  const after = new Map();          // car -> speed once it is out again
+  const cruise = [];                // speed in the through-lane, before the box
+  let capped = 0;                   // car-seconds of a cap on a car that cannot pit
   while (race.state !== State.FINISHED && t < 1500) {
     const was = race.field.map((c) => c.onPit);
     race.update(DT, AIM_LEFT);
     t += DT;
     race.field.forEach((c, i) => { if (!was[i] && c.onPit) joined.push(t); });
+    for (const c of race.field) {
+      if (c.finished) continue;
+      if (c.onPit) {
+        // Cruising the through-lane: past the entry taper and not yet braking
+        // for its own box, which is the only stretch where the limit is what
+        // decides the speed.
+        const box = race.pits.road.boxFor(c.gridIndex);
+        if (c.pit === 'in' && c.s > 25 && box.d - c.s > 130) cruise.push(c.speed);
+        continue;
+      }
+      // A cap belongs to a car that is on its way in. On one that is not - it
+      // has already stopped, or its own window has shut - it is a car doing
+      // the pit limit on the racing line for no reason anybody can see.
+      //
+      // Only *past* the entrance. Before it a car is braking on the approach
+      // with `canEnter` legitimately false, because it has not reached the
+      // entry yet; counting that flags 575 car-s of the mechanism that gets
+      // the field into the pits at all.
+      if (c.pitCap != null
+          && (!race.shouldPit(c)
+              || (track.delta(race.pits.road.entryS, c.s) >= 0
+                  && !race.pits.canEnter(c)))) capped += DT;
+      if (c.pitStops > 0) {
+        const a = after.get(c) || { n: 0, sum: 0 };
+        a.n++; a.sum += c.speed;
+        after.set(c, a);
+      }
+    }
     const lapTime = track.lapLength / 60;
     wave = Math.max(wave, joined.filter((x) => x > t - lapTime).length);
     const lane = race.field.filter((c) => c.onPit);
@@ -451,6 +490,36 @@ for (const spec of todo) {
   stuck < 6
     ? ok(`the player was never stuck (${stuck.toFixed(1)} s below 8 km/h in the lane)`)
     : fail(`the player crawled for ${stuck.toFixed(1)} s with nobody working on the car`);
+
+  // **Back up to pace afterwards.** The one the owner reported: `car.pitCap`
+  // was written only by `Race.aimForPits`, which was only *called* while a car
+  // wanted to come in - so the pit speed limit it wrote on the approach stayed
+  // on the car for the rest of the race. Every rival that stopped aimed at
+  // 22 m/s of a possible 87 from then on. The race still finished, everybody
+  // still got served, no car ever left the road: not one assertion here moved.
+  const paces = [...after].map(([c, a]) => a.sum / a.n / c.topSpeed);
+  const slow = paces.filter((f) => f < 0.55).length;
+  paces.length && slow === 0
+    ? ok(`all ${paces.length} got back up to pace (slowest ` +
+         `${(Math.min(...paces) * 100).toFixed(0)}% of its top speed after its stop)`)
+    : fail(`${slow} of ${paces.length} never got back up to pace after stopping ` +
+           `(slowest ${(Math.min(...paces) * 100).toFixed(0)}%)`);
+
+  // **And the lane itself runs at its limit.** A queue rule that asks "could I
+  // stop in this gap" treats the car in front as parked: to run at the limit a
+  // car needed a 47 m gap in a 500 m lane, so eighteen of them crawled.
+  const lim = data.pit.speedLimit;
+  const mean = cruise.reduce((a, b) => a + b, 0) / Math.max(1, cruise.length);
+  mean > lim * 0.75
+    ? ok(`the lane flows (${(mean * 3.6).toFixed(0)} km/h cruising, limit ` +
+         `${(lim * 3.6).toFixed(0)})`)
+    : fail(`the queue crawls: ${(mean * 3.6).toFixed(0)} km/h of a ` +
+           `${(lim * 3.6).toFixed(0)} km/h limit`);
+
+  capped < 1
+    ? ok('nobody was held at the pit limit who could not come in')
+    : fail(`${capped.toFixed(0)} car-s at the pit limit on the racing line ` +
+           'by cars that could not pit');
 }
 
 console.log(failed ? `\n${failed} problem(s)` : '\nthe pit roads are real, clear and driveable');

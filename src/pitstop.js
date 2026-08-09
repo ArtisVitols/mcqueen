@@ -26,7 +26,12 @@ export const Pit = {
 
 const STOP_SPEED = 0.35;        // m/s that counts as stopped in the box
 const BOX_REACH = 1.2;          // metres either side of the box centre
-const STOP_DECEL = 2.6;         // m/s^2 aimed at the mark - a firm, smooth stop
+// m/s^2 aimed at the mark - a firm, smooth stop. Half a g: gentle enough that
+// the car settles on the box rather than nodding onto it, and firm enough to
+// stop from the pit limit in 100 m. It used to be 2.6, which from 30 m/s wants
+// 173 m - longer than the run to Motor Speedway's first box, so the whole
+// benefit of the limit went into a longer braking zone instead of the clock.
+const STOP_DECEL = 4.5;
 const SETTLE = 0.35;            // seconds held still before the crew start
 const LANE_HOLD = 1.4;          // how hard a car in the pits holds its lane
 // Metres before the box at which the car peels out of the through-lane. Long
@@ -302,6 +307,12 @@ export class PitLane {
     car.pit = Pit.OUT;
     car.pitTimer = 0;
     car.pitDone = car.lap;
+    // The AI's pit speed cap goes with the pit lane. `Race.aimForPits` clears
+    // it too and would do so on the next step anyway, but a car that has
+    // rejoined must not spend even one frame still aiming at 22 m/s - and
+    // having the reset next to `pit = Pit.OUT` is what makes it obvious that
+    // it is part of leaving.
+    car.pitCap = null;
   }
 
   /**
@@ -434,15 +445,23 @@ export class PitLane {
    * straight through each other - piled up, sideways, crawling, with the
    * player among them and no button that would help.
    *
-   * Braked on the distance remaining, the same curve the stop itself uses, so
-   * a car settles a car's length behind the one ahead instead of hitting it.
-   * The lateral test is what keeps it a *lane* rule: a car being serviced sits
-   * against the wall, several metres off the through-lane, and must not stop
-   * the queue driving past it.
+   * Braked on the distance remaining, so a car settles a car's length behind
+   * the one ahead instead of hitting it. The lateral test is what keeps it a
+   * *lane* rule: a car being serviced sits against the wall, several metres
+   * off the through-lane, and must not stop the queue driving past it.
+   *
+   * **The car in front is usually moving, and the first version of this did
+   * not know that.** It asked "how fast could I be going and still stop in the
+   * gap" - which is the right question about a parked car and the wrong one
+   * about a queue. To be allowed to run at the pit limit a car needed a 47 m
+   * gap; the whole lane is 500 m, so eighteen cars in it crawled at a third of
+   * the limit for the entire stop. Adding the leader's own speed is the
+   * standard following rule, and when the leader really is stopped it
+   * degenerates to exactly the old formula.
    */
   queueSpeed(car, field) {
     if (!field) return Infinity;
-    let gap = Infinity;
+    let limit = Infinity;
     for (const other of field) {
       if (other === car || other.road !== car.road) continue;
       // The pit road has ends, so this is a plain subtraction: no wrapping,
@@ -450,15 +469,17 @@ export class PitLane {
       const ahead = other.s - car.s;
       if (ahead <= 0 || ahead > QUEUE_LOOK) continue;
       if (Math.abs(other.n - car.n) > QUEUE_WIDE) continue;
-      gap = Math.min(gap, ahead);
+      // Every candidate, not just the nearest: a stopped car thirty metres up
+      // binds harder than a moving one ten metres up, and taking the closest
+      // would miss it.
+      //
+      // Braked harder than the stop on the mark is - this is a car avoiding
+      // the one in front rather than placing itself on a painted rectangle,
+      // and it has to answer inside a car's length.
+      limit = Math.min(limit, Math.sqrt(Math.max(0,
+        other.speed * other.speed + 2 * QUEUE_DECEL * (ahead - QUEUE_GAP))));
     }
-    if (gap === Infinity) return Infinity;
-    // Braked harder than the stop on the mark is. `STOP_DECEL` is tuned to put
-    // a car gently on a painted rectangle; this is a car avoiding the one in
-    // front, and at the pit limit it needs 40 m rather than 93 to do it. Using
-    // the gentle figure meant a car joining the back of a stopped queue simply
-    // could not stop in time and drove into it.
-    return Math.sqrt(Math.max(0, 2 * QUEUE_DECEL * (gap - QUEUE_GAP)));
+    return limit;
   }
 
   /** The pit speed limit, for whoever is holding the rev limiter. */

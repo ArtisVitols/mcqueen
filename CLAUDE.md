@@ -823,8 +823,44 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   never reaches it - the state machine takes the controls and returns first. So
   every car aimed at the speed limit regardless of what was in front.
   `queueSpeed` brakes on the gap, and on a *firmer* figure than the stop uses:
-  `STOP_DECEL` is tuned to place a car gently on a painted rectangle and needs
-  93 m from the pit limit, which is longer than the lane's useful length.
+  `STOP_DECEL` places a car gently on a painted rectangle, which is a different
+  job from not hitting the one in front.
+- **... and the car in front of you is usually *moving*.** The first version of
+  `queueSpeed` asked "how fast could I be going and still stop in this gap",
+  which is the right question about a parked car and the wrong one about a
+  queue: to run at the limit a car needed a 47 m gap, in a lane 500 m long, so
+  eighteen cars in it crawled at a third of the limit for the whole stop. That
+  is the owner's "when going in pits all cars drives really slow". The leader's
+  own speed goes into the sum - the standard following rule - and when the
+  leader really is stopped it degenerates to exactly the old formula. Evaluate
+  it for *every* car ahead and take the lowest, not for the nearest: a stopped
+  car thirty metres up binds harder than a moving one at ten.
+- **A cap that is written in a branch must be cleared in one that always
+  runs.** `car.pitCap` is the AI's pit-approach speed limit, read by
+  `Driver.update` every step and written only by `Race.aimForPits` - which was
+  only *called* while a car wanted to come in. So the last value it wrote
+  stood: a rival that had pitted has `tyre = 1`, `shouldPit` goes false,
+  nothing clears the cap, and it aims at 22 m/s of a possible 87 from its stop
+  to the flag. Eighteen of them. The race still finished, everybody still got
+  served, nothing left the road - **not one existing assertion moved.**
+  `aimForPits` now takes a `want` flag and is called unconditionally, the way
+  `concede` always was, and `PitLane.leave` clears the cap beside
+  `pit = Pit.OUT`. If you add another per-car cap, give it the same shape.
+- **Release it on the car's *own* entry window.** `pits.entryWindow` is the
+  widest window anybody has - it is for sizing the approach - while whether a
+  given car may still turn in is `windowFor(car.gridIndex)`, a third of it for
+  the first box: 105 m against 354 m at Motor Speedway, 209 against 635 at
+  Yoyleland. Releasing on the wide one left a car that could no longer possibly
+  pit driving at the pit limit on the racing line for another quarter of a lap.
+  Ask `canEnter`, which is the rule itself.
+- **The limit is 30 m/s, and it is not a realism figure.** Real pit road is
+  about 22, and at 22 a stop cost 33 s at Motor Speedway and 47 s at Yoyleland,
+  whose lane is 816 m long - most of a racing lap at walking pace, for a
+  five-year-old. 30 m/s with `STOP_DECEL` at 4.5 makes it 26 s and 37 s. The
+  two go together: at 2.6 m/s^2 a car needs 173 m to stop from 30, and Motor
+  Speedway's first box is 150 m down the lane, so the whole benefit went into a
+  longer braking zone instead of the clock. `pitSpeed` in `tracks.json`
+  overrides it per circuit; nothing needs one today.
 - **Turning in needs room to stop in, not just room to fit.** A car enters at
   racing speed and the limiter takes a second to bring it down, so a lane with
   a stationary queue thirty metres in is a collision however hard it then
@@ -1327,13 +1363,15 @@ What "good" looks like right now:
   than on Normal under two of the three models while every other number says
   Hard is plainly harder. What is asserted is what still tracks: Hard gives
   three to seven times the duels and takes back three to seven times the
-  places. Today, across the circuits: Arcade 15 duels and 5 places lost on
-  Normal against 109 and 38 on Hard.
+  places. Today, across the circuits: Arcade 84 duels and 16 places lost on
+  Normal against 119 and 36 on Hard. Those totals roughly doubled when the pit
+  speed cap stopped being left on a car for the rest of the race - a field that
+  can drive again after its stop is a field you have to pass again.
   **Read it per circuit as well as in total.** The totals looked perfectly
   healthy for a release in which Motor Speedway on Hard produced *one duel in
   five laps* - the player pulled clear, went out of `FIGHT_FORGET` range, and
   nobody ever came back at them, which is exactly what the owner reported.
-  That circuit alone is now 27 duels and 5 places lost. The shape
+  That circuit alone is now 33 duels and 4 places lost on Hard. The shape
   is only asserted for the models with a driver aid: Pro has none, so the
   "player" there is a scripted driver whose own quality would dominate the
   numbers, and all that is required of it is that the field is reachable.
@@ -1355,7 +1393,7 @@ What "good" looks like right now:
   surface, entry and exit overlapping the racing line — then a whole race, in
   which the player drives in, is frozen for the service, stays under the limit
   at the boxes, gains no progress at either handover, and every car stops -
-  7 of 7 on all three circuits, which is the number that matters, because a
+  18 of 18 on all three circuits, which is the number that matters, because a
   rival that *cannot* reach the entrance stays out on dead tyres and beats
   everybody who did it properly. It also asserts the two things a stop must
   never disturb: that no handover moves a car more than a car's length or
@@ -1365,6 +1403,12 @@ What "good" looks like right now:
   could have driven.** That is what found the contact shove, which no
   handover check could have - it happens between handovers, in the middle of
   the lane, and it was thousands of times worse than the thing being watched.
+  And three that ask what a stop *cost*, which nothing here used to: **every
+  car is back up to pace afterwards** (the slowest is at 61-66% of its top
+  speed; it was 25% for every one of them, and no other assertion moved), **the
+  lane flows** at 93-102 km/h of its 108 limit rather than crawling, and
+  **nobody is held at the pit limit out on the racing line who cannot come in.**
+  The whole field now turns in on one lap - 18, 13 and 18 of 18.
 - `check_crashes.mjs` — runs at fifty times the shipped incident rate so every
   race has one, then checks the things a wreck must never do: leave a car
   outside the corridor, get shoved back onto the racing line, start on top of

@@ -325,7 +325,9 @@ export class Race {
         // would pit every lap for no reason. Same rule that already makes the
         // aid overtake there.
         const auto = (car.lift ?? 0) >= 0.7 && this.shouldPit(car);
-        if (auto) this.aimForPits(car, dt);
+        // Unconditionally, because `aimForPits` owns `car.pitCap` and clearing
+        // it is half its job. See the note on it.
+        this.aimForPits(car, dt, auto);
         // Turning in is *asking* - holding the button towards the inside -
         // never merely being near the edge. On Easy the aid parks the car on
         // the low line, so "close enough" pitted a five-year-old every single
@@ -350,12 +352,20 @@ export class Race {
       // Rivals stop too, or a stop is a penalty rather than a strategy - and
       // "Easy is winnable by holding the throttle down" would stop being true
       // the moment tyres mattered.
-      if (!car.isPlayer && this.shouldPit(car)) {
-        // A rival has to be *steered* in. Without this it wants to pit, is
-        // told it may, and sails past the entry every lap on the racing line.
-        this.aimForPits(car, dt);
-        this.pits.tryEnter(car, this.field);
-      }
+      //
+      // **`aimForPits` is called every step, whether or not this car wants to
+      // come in.** It is the only thing that writes `car.pitCap`, and the AI
+      // reads that cap every step - so calling it only when a stop is due left
+      // the last value it wrote standing for the rest of the race. A car that
+      // had just pitted has `tyre = 1`, so `shouldPit` is false, so nothing
+      // ever cleared the pit speed limit off it: eighteen rivals aiming at
+      // 22 m/s of a possible 87 from their stop to the flag. `concede` above
+      // has always had this shape; this one did not.
+      const wantsPit = !car.isPlayer && this.shouldPit(car);
+      this.aimForPits(car, dt, wantsPit);
+      // A rival has to be *steered* in. Without this it wants to pit, is
+      // told it may, and sails past the entry every lap on the racing line.
+      if (wantsPit) this.pits.tryEnter(car, this.field);
     }
 
     // The AI gets its tow through its own target speed; a human has no such
@@ -515,10 +525,15 @@ export class Race {
    * Overrides whatever the driver or the aid asked for, and only inside the
    * entry window - the same `laneSteer` everything else uses, so a car heading
    * for the pits moves like a car and not like a magnet.
+   *
+   * **This function owns `car.pitCap`, so it must be called every step for
+   * every car** - `want` is how a caller says "not this one", not a reason to
+   * skip the call. The cap is read unconditionally by `Driver.update`, so any
+   * step that does not run this leaves the last value it wrote in force.
    */
-  aimForPits(car, dt) {
+  aimForPits(car, dt, want = true) {
     car.pitCap = null;
-    if (!this.pits || car.pit !== Pit.OUT || car.finished) return;
+    if (!want || !this.pits || car.pit !== Pit.OUT || car.finished) return;
     // From well *before* the entrance, not only once inside the window.
     //
     // The two ribbons only overlap for the first few metres of the taper - by
@@ -528,7 +543,17 @@ export class Race {
     // has gone by. It then sails past every lap, which is how a race ended
     // with one car pitting and six driving round on dead tyres.
     const d = this.track.delta(this.pits.road.entryS, car.s);
-    if (d < -PIT_APPROACH || d > this.pits.entryWindow) return;
+    if (d < -PIT_APPROACH) return;
+    // Past the entrance, only while *this* car could still turn in.
+    //
+    // `pits.entryWindow` is the widest window anybody has - it is for sizing
+    // the approach - and a car's own is `windowFor(gridIndex)`, which for the
+    // first box is a third of it: 105 m against 354 m at Motor Speedway, 209
+    // against 635 at Yoyleland. Releasing on the wide one held a car that
+    // could no longer possibly pit at the pit speed limit, on the racing line,
+    // for another quarter of a lap. `canEnter` is the rule itself, and it also
+    // covers having already been in this lap.
+    if (d >= 0 && !this.pits.canEnter(car)) return;
     const st = this.track.sample(car.s, car.st);
     car.steer = laneSteer(car, this.track.limit(st, -1) + 0.6, dt, PIT_AIM_CLOSE);
 
