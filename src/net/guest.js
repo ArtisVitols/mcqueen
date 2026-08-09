@@ -190,6 +190,18 @@ export class GuestView {
           continue;
         }
       }
+      // Back on the circuit, and *said so* rather than assumed.
+      //
+      // The branch above only moves a car between ribbons when it can see the
+      // change happen - `a.onPit !== b.onPit`. Lose the packet where it flips
+      // and both snapshots read "on the circuit" while this copy of the car is
+      // still on the pit ribbon, so its lap position is interpreted as a pit
+      // distance for the rest of the race. It showed up as a guest drawing a
+      // car off the road seventeen hundred times on a lossy link. The newest
+      // packet is authoritative about which road a car is on; take its word
+      // every time, not only when it changes.
+      rival.road = race.track;
+      rival.onPit = false;
       // Interpolate along the track, not through the world: two cars either
       // side of the start line are 2 km apart in `s` and touching in fact.
       rival.s = race.track.wrap(a.s + race.track.delta(a.s, b.s) * t);

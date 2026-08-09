@@ -98,7 +98,18 @@ const out = await page.evaluate(async (only) => {
         marks.push({ target, local, front: w.front, side: w.centre.x, centre: w.centre.clone() });
       }
     }
-    report.push({ id: spec.id, wheels: wheels ? wheels.describe() : null, marks, object });
+    // The shape of what each wheel node is *holding*. A wheel that has quietly
+    // adopted a suspension arm or a piece of bodywork shows up here as a wheel
+    // that is not the same size as the others, which is the only signal that
+    // survives - the count is right, the render looks busy, and the thing
+    // turning with it is only obvious once somebody watches it go round.
+    const shapes = wheels ? wheels.wheels.map((w) => {
+      const b = new THREE.Box3().setFromObject(w.node, true);
+      const s2 = new THREE.Vector3();
+      b.getSize(s2);
+      return [+s2.x.toFixed(3), +s2.y.toFixed(3), +s2.z.toFixed(3)];
+    }) : [];
+    report.push({ id: spec.id, wheels: wheels ? wheels.describe() : null, marks, object, shapes });
   }
 
   const at = (car, m) => {
@@ -119,6 +130,7 @@ const out = await page.evaluate(async (only) => {
   const measured = report.map((r, i) => ({
     id: r.id,
     wheels: r.wheels,
+    shapes: r.shapes,
     moved: r.marks.map((m, k) => {
       const a = before[i][k].clone().sub(m.centre);
       const b = after[i][k].clone().sub(m.centre);
@@ -203,6 +215,25 @@ for (const car of out.measured) {
   if (steering !== 2) {
     console.log(`  ! ${steering} steered wheel(s) - the front axle should be 2`);
     failed++;
+  }
+
+  // Every wheel on a car is the same wheel. Mater's twinned rears are twice as
+  // wide as his fronts, so the *width* is allowed to differ - but a wheel is a
+  // disc, and its diameter is the same in both directions and the same at both
+  // ends of the car. Ivy came back from a fix with her front wheels half a
+  // metre taller than her rears: the suspension was turning with them.
+  if (car.shapes && car.shapes.length > 1) {
+    for (const axis of [1, 2]) {
+      const all = car.shapes.map((sh) => sh[axis]).sort((a, b) => a - b);
+      const mid = all[all.length >> 1];
+      const worst = Math.max(...all.map((v) => Math.abs(v - mid) / mid));
+      if (worst > 0.2) {
+        console.log(`  ! wheels differ by ${(worst * 100).toFixed(0)}% in ` +
+                    `${axis === 1 ? 'height' : 'length'} (${all.join(', ')}) - ` +
+                    'one of them is holding something that is not a wheel');
+        failed++;
+      }
+    }
   }
 
   console.log('  quarter turn: ' +

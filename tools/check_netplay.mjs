@@ -267,7 +267,7 @@ for (const c of CASES) {
                   `(limit ${allowedPeak.toFixed(1)} m)`);
       failed++;
     }
-    if (r.outside > 0) { console.log(`    ! the guest drew a car off the road ${r.outside} times`); failed++; }
+    if (r.outside > 0) { console.log(`    ! a guest drew a car off the road ${r.outside} times`); failed++; }
     if (!agree) {
       console.log('    ! the ends disagree about a place that was decided');
       console.log(`      host:  ${r.order.join(' ')}`);

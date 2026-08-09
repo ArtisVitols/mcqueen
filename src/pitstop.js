@@ -57,10 +57,10 @@ const QUEUE_DECEL = 6.0;
 // arrived". Generous - it only has to beat the queue - see the note in IN.
 const BOX_STALL = 12;
 // Metres of pit road that must be empty before a car may turn in.
-const ENTRY_CLEAR = 8;
-// ... and how many seconds of the entering car's own speed have to be clear
-// in front of it as well.
-const ENTRY_SECONDS = 1.2;
+const ENTRY_CLEAR = 9;
+// What a car still needs after turning in: the room to cross the lane to its
+// box and stop on the mark, from the pit limit.
+const BOX_ROOM = 45;
 
 /** How long the crew take, per difficulty. Easy is fastest - see below. */
 export const SERVICE_TIME = { easy: 3.0, normal: 5.5, hard: 8.0 };
@@ -86,12 +86,34 @@ export class PitLane {
     // every circuit, whatever the geometry.
     const firstBox = this.road.boxes.length
       ? Math.min(...this.road.boxes.map((b) => b.d)) : this.road.length * 0.3;
-    this.entryWindow = this.road.lapSpan * (firstBox * 0.5) / this.road.length;
+    this.firstBox = firstBox;
+    // The widest anybody's window can be, for the approach test.
+    this.entryWindow = this.windowFor(this.road.boxes.length - 1);
     this.lastBox = this.road.boxes.length
       ? Math.max(...this.road.boxes.map((b) => b.d)) : this.road.length * 0.7;
     this.exitN = this.findExitLane();
     this.crew = null;             // Guido, if the models are loaded
     this.rig = null;              // Mack, parked
+  }
+
+  /**
+   * How much of the lap this car may still turn in over, in lap metres.
+   *
+   * **Per car, because it depends on where its box is.** One window for
+   * everybody has to be short enough for whoever is stopping first, and a
+   * window is a *place*: it admits however many cars can drive through it, and
+   * at a safe following distance that was eight of eighteen. The rest went
+   * round and tried again, lap after lap - which is exactly what the owner
+   * saw, and it is the entry rule that caused it rather than anything in the
+   * lane. A car whose box is at the far end of the pits can turn in much
+   * later, and letting it do so is what gets the whole field in on one lap.
+   *
+   * `BOX_ROOM` is what it still needs after turning in: room to cross to its
+   * box and stop on the mark.
+   */
+  windowFor(boxIndex) {
+    const box = this.road.boxFor(boxIndex);
+    return this.road.lapSpan * Math.max(20, box.d - BOX_ROOM) / this.road.length;
   }
 
   /** True while `s` is inside the stretch of lap the pit road parallels. */
@@ -110,7 +132,7 @@ export class PitLane {
     if (car.pit !== Pit.OUT || car.finished || car.onPit) return false;
     if (car.pitDone === car.lap) return false;      // already been in this lap
     const d = this.track.delta(this.road.entryS, car.s);
-    return d >= 0 && d <= this.entryWindow;
+    return d >= 0 && d <= this.windowFor(car.gridIndex);
   }
 
   tryEnter(car, field = null) {
@@ -139,21 +161,37 @@ export class PitLane {
     if (hit.n < this.road.limit(pst, -1) - ENTRY_REACH ||
         hit.n > this.road.limit(pst, 1) + ENTRY_REACH) return false;
     const n = THREE.MathUtils.clamp(hit.n, this.road.limit(pst, -1), this.road.limit(pst, 1));
+    // Turning *in* still moves a car sideways at Yoyleland - about 1.2 m, with
+    // ten degrees of roll - because its taper is barely a car wide and its
+    // first station sits *outside* the circuit's corridor, so a car cannot
+    // project into the middle of it however well it is steered. Refusing until
+    // the car fits was tried: Motor Speedway got a 5 m jump elsewhere and
+    // Yoyleland admitted nobody at all for a whole race, because `Track.limit`
+    // reserves 1.6 m for bodywork and goes *negative* on a lane that narrow.
+    // The clamp is the lesser evil, and coming *out* - which is what shows,
+    // and what was reported - is 0.18 m on every circuit.
     // Not on top of somebody who is already in. The entry taper is barely
     // wider than a car - a metre and a bit at Motor Speedway - so two cars
     // turning in together have nowhere to be but the same place, and the
     // handover would put one inside the other. Refusing costs a lap; landing
     // on somebody costs the pile-up this whole queue exists to prevent.
     if (field) {
-      // The room needed is the room to *stop* in. A car turns in at racing
-      // speed and the limiter takes a second to bring it down, so diving into
-      // a lane with a stationary queue thirty metres in is a collision however
-      // hard it then brakes.
-      const need = Math.max(ENTRY_CLEAR, car.speed * ENTRY_SECONDS);
+      // A car's length and a bit, and no more.
+      //
+      // This gate used to demand `car.speed * 1.2` - the room to stop in from
+      // *racing* speed - because a car used to arrive at the entrance flat
+      // out. It does not any more (`Race.aimForPits` brakes it down to the pit
+      // limit first), and that demand was catastrophic: at 70 m/s it wanted
+      // eighty metres of empty lane, which a lane with a queue in it never
+      // has. Two or three cars got in per lap and the other fifteen drove
+      // round and asked again, lap after lap - exactly what the owner saw.
+      //
+      // What it has to be is the following distance the queue then holds, or
+      // a car joins already too close and closes the rest itself.
       for (const other of field) {
         if (other === car || other.road !== this.road) continue;
         const ahead = other.s - hit.s;
-        if (ahead > -ENTRY_CLEAR && ahead < need) return false;
+        if (ahead > -ENTRY_CLEAR && ahead < ENTRY_CLEAR) return false;
       }
     }
     car.useRoad(this.road, hit.s, n);
@@ -305,7 +343,10 @@ export class PitLane {
       const target = Math.min(left <= 0 ? 0 : Math.min(this.road.speedLimit, curve),
                               this.queueSpeed(car, field));
       car.throttle = THREE.MathUtils.clamp((target - car.speed) * 0.5, 0, 1);
-      car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.35, 0, 1);
+      // Firmer than the throttle. This brake is doing two jobs - arriving on
+      // the mark, and not running into the back of the queue - and the second
+      // one has to answer inside a car's length.
+      car.brake = THREE.MathUtils.clamp((car.speed - target) * 0.7, 0, 1);
 
       // Stationary on the mark. The longitudinal test is tight because the
       // approach above can actually hit it; the lateral one is not a condition

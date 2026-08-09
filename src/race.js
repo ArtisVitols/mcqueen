@@ -41,7 +41,11 @@ const PIT_AIM_CLOSE = 3.0;
 // racing speed. At 150 m four of the six rivals arrived at the entry still
 // out on the line, could not turn in, and drove the last four laps of a race
 // on dead tyres wanting a stop they could never take.
-const PIT_APPROACH = 320;
+const PIT_APPROACH = 700;
+// How hard a car slows on its way to the pit entrance. Sized so that a car at
+// full speed is down to the pit limit by the time it turns in, over the 320 m
+// `PIT_APPROACH` gives it.
+const PIT_BRAKE = 3.5;
 
 /**
  * Incidents: a rival gets it wrong, runs off the racing line and stops.
@@ -513,6 +517,7 @@ export class Race {
    * for the pits moves like a car and not like a magnet.
    */
   aimForPits(car, dt) {
+    car.pitCap = null;
     if (!this.pits || car.pit !== Pit.OUT || car.finished) return;
     // From well *before* the entrance, not only once inside the window.
     //
@@ -526,6 +531,29 @@ export class Race {
     if (d < -PIT_APPROACH || d > this.pits.entryWindow) return;
     const st = this.track.sample(car.s, car.st);
     car.steer = laneSteer(car, this.track.limit(st, -1) + 0.6, dt, PIT_AIM_CLOSE);
+
+    // **Slow down before the entrance, not after it.**
+    //
+    // This is what a pit road entry is for, and leaving it out was the whole
+    // problem: eighteen cars strung over two hundred metres of track at 250
+    // km/h become eighteen cars in sixty-five metres of pit lane at 79, and no
+    // amount of queueing inside the lane can undo a threefold compression that
+    // has already happened. They arrive on top of each other because they were
+    // never asked to slow down.
+    //
+    // The earlier answer - refuse entry unless the lane ahead is clear - kept
+    // them apart by keeping them *out*: two or three cars a lap got in and the
+    // rest drove round again, lap after lap, which is exactly what the owner
+    // saw. Braking on the approach lets the whole field in at once and strings
+    // it out on the racing line first, which is also what it looks like in the
+    // sport.
+    if (d < 0) {
+      const left = -d;
+      car.pitCap = Math.sqrt(this.pits.speedLimit * this.pits.speedLimit
+                             + 2 * PIT_BRAKE * left);
+    } else {
+      car.pitCap = this.pits.speedLimit;
+    }
   }
 
   /**

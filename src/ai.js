@@ -360,6 +360,9 @@ export class Driver {
     // driver *aims* at rather than on the limiter, so the car lifts rather
     // than hitting a wall - it keeps racing, it just stops driving away.
     if (car.concedeCap != null) targetSpeed = Math.min(targetSpeed, car.concedeCap);
+    // ... and the run down to the pit entrance, for a car that has decided to
+    // come in. See Race.aimForPits.
+    if (car.pitCap != null) targetSpeed = Math.min(targetSpeed, car.pitCap);
 
     const err = targetSpeed - car.speed;
     car.throttle = clamp(err * 0.5, 0, 1);

@@ -413,10 +413,32 @@ function adopt(cluster, island) {
   const w = cluster.seed.getSize(_s1);
   const ic = island.box.getCenter(_c2);
   const is = island.box.getSize(_s2);
-  if (is.x > w.x * 1.25 || is.y > w.y * 1.25 || is.z > w.z * 1.25) return false;
-  return Math.abs(ic.x - c.x) < w.x * 0.75
-      && Math.abs(ic.y - c.y) < w.y * 0.6
-      && Math.abs(ic.z - c.z) < w.z * 0.6;
+
+  // **A wheel is a disc, and that is the shape the test has to be.** A box
+  // around the seed admits anything in the corners of it - which is where a
+  // suspension arm, a diffuser and a wheel arch all live. Shu Todoroki's
+  // wheels came out 1.32 m long against 0.88 tall and Ivy's grew half a metre
+  // of upright: bodywork and suspension, turning with the wheel.
+  const r = Math.max(w.y, w.z) / 2;
+  const off = Math.hypot(ic.y - c.y, ic.z - c.z);      // from the axle, sideways on
+
+  // Across the car it may be a little wider than the tyre - a hub sticks out -
+  // and no more. This is what keeps a suspension arm, which reaches inboard,
+  // from being part of the wheel.
+  if (Math.abs(ic.x - c.x) > w.x * 0.6 || is.x > w.x * 1.5) return false;
+
+  // Two shapes belong to a wheel and nothing else does:
+  //
+  //   a rim or a disc  - as big as the wheel, but *centred on the axle*
+  //   a tread block    - out at the rim, but *small*
+  //
+  // Bodywork is the third case, big and off-centre, and it is the one to
+  // refuse. Sizing alone cannot do it: a rim is nearly the whole wheel, and a
+  // tread lug sticks out past the tyre by a third on a monster truck.
+  const centred = off < r * 0.35;
+  const small = is.y < w.y * 0.5 && is.z < w.z * 0.5;
+  if (!centred && !small) return false;
+  return off + Math.max(is.y, is.z) / 2 < r * (centred ? 1.15 : 1.45);
 }
 const _c1 = new THREE.Vector3();
 const _c2 = new THREE.Vector3();

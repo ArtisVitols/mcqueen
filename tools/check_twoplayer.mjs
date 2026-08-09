@@ -150,7 +150,16 @@ await host.waitForFunction("!document.getElementById('btn-race').disabled",
 
 await host.click('#btn-race');
 const racing = "window.game.race && window.game.race.humans.length === 3";
-for (const p of tabs) await p.waitForFunction(racing, { timeout: 240000, polling: 300 });
+try {
+  for (const p of tabs) await p.waitForFunction(racing, { timeout: 240000, polling: 300 });
+} catch (err) {
+  console.log('  state at timeout:', JSON.stringify(await Promise.all(tabs.map((p) =>
+    p.evaluate(() => ({ role: window.game.net?.role, race: !!window.game.race,
+      humans: window.game.race?.humans.length ?? null,
+      lobbyHidden: document.getElementById('lobby').classList.contains('hidden') }))))));
+  console.log('  errors so far:', JSON.stringify([...new Set(errors)].slice(0, 6)));
+  throw err;
+}
 ok('all three tabs built a race');
 
 const grids = await Promise.all(tabs.map((p) => p.evaluate(() => ({

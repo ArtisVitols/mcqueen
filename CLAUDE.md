@@ -465,6 +465,22 @@ speed, steers the front pair and leans the body. Nothing re-exports a GLB -
   places and would double the count.
 - **Weld before splitting.** OBJ exports repeat each corner per face, so
   without welding every triangle is its own island.
+- **A wheel is a disc, so the adoption test has to be disc-shaped.** A box
+  around the seed admits whatever is in the *corners* of it, and that is
+  exactly where a suspension arm, a diffuser and a wheel arch live: Shu
+  Todoroki's wheels came out 1.32 m long against 0.88 tall, and Ivy's grew half
+  a metre of upright which then turned with them. Two shapes belong to a wheel
+  and nothing else does - a rim, which is nearly as big as the wheel but
+  *centred on the axle*, and a tread block, which is out at the rim but
+  *small*. Bodywork is the third case, big and off-centre, and it is the one to
+  refuse. Sizing alone cannot separate them: a rim is most of the wheel, and a
+  monster truck's tread sticks out past the tyre by a third.
+- **Every wheel on a car is the same wheel.** `check_wheels` asserts the
+  diameter matches across all of them, in both directions, to within 20% -
+  width is exempt because Mater's twinned rears are genuinely double. That is
+  the only signal that survives a bad adoption: the count is right, the render
+  looks busy, and what is turning with the wheel is obvious only to somebody
+  watching it go round.
 - **A tread block is not wheel-shaped, and is still part of the wheel.** Ivy's
   monster-truck tyres are a smooth carcass, a ring of separate lugs and a rim,
   each its own island and only the carcass round enough to pass `isWheel` - so
@@ -778,6 +794,30 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   A car in a queue is behind several others at once, and 0.6 per second each
   compounded to 97% of its speed gone in a second. `separate` records the
   harshest contact per car and applies it after the pair loop.
+- **The entry rules are what decide whether the field gets in, and they cost
+  four attempts to get right.** Refusing entry unless the lane ahead was clear
+  by `speed x 1.2` - the room to stop in from *racing* speed - meant two or
+  three cars a lap got in and the other fifteen drove round and asked again,
+  lap after lap. That is the owner's report, and it was mine: the gate was
+  written when cars still arrived at the entrance flat out.
+  - **Brake on the approach instead** (`Race.aimForPits` sets `car.pitCap`).
+    Eighteen cars strung over two hundred metres at 250 km/h become eighteen
+    cars in sixty-five metres of pit lane at 79, and no queueing *inside* the
+    lane can undo a threefold compression that has already happened.
+  - **The entry window is per car**, because it depends on where that car's box
+    is. One window has to be short enough for whoever stops first, and a window
+    is a *place*: it admits however many cars can drive through it, which at a
+    safe following distance was eight of eighteen.
+  - **`ENTRY_CLEAR` is the following distance the queue then holds**, not more.
+    Below it a car joins already too close and closes the rest itself; well
+    above it, everybody waits a lap.
+  - What that buys: nine to thirteen of eighteen turn in *on the same lap*, and
+    the rest on the next. `check_pits` asserts it, because the failure was
+    invisible in every other number - the race finished, everybody stopped,
+    nothing overlapped.
+- **A brush is the price of letting the field in.** The 0.1 m overlap bar was
+  met by turning almost everybody away at the entrance. It is 1.3 m now, and
+  that is the right way round.
 - **A pit lane is a queue, and nothing in it knew that.** The AI's "do not
   drive through the back of anybody" lives in `ai.js`, and a car in the lane
   never reaches it - the state machine takes the controls and returns first. So
@@ -913,6 +953,14 @@ tested headlessly - see `tools/check_netplay.mjs` and `tools/check_lobby.mjs`.
 - **The guest must not predict through the countdown.** The host holds the grid
   still; a guest that runs its own physics anyway has driven most of a lap
   before the lights go out.
+- **The newest packet is authoritative about which *road* a car is on.** The
+  guest only moved a rival between ribbons when it could see the change happen
+  in the pair it was interpolating - `a.onPit !== b.onPit`. Lose the packet
+  where it flips and both snapshots read "on the circuit" while that copy of
+  the car is still on the pit ribbon, so its lap position is read as a pit
+  distance for the rest of the race: a guest drew a car off the road seventeen
+  hundred times on a 5% loss link. Take the newest packet's word every time,
+  not only when it changes.
 - **Extrapolation past the newest snapshot is clamped to the corridor.**
   Running on is what stops a dropped packet freezing the field, but on a lossy
   link the gaps get long enough to draw a car through the wall.
