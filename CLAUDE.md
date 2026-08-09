@@ -19,6 +19,11 @@ Easy difficulty must be winnable by holding the throttle down and nothing else.
 Cars must never spin, stall, or face the wrong way. Prefer forgiving over
 realistic when they conflict.
 
+Where it has got to: eighteen cars race, up to four of them people, on three
+circuits, with pit stops, tyre wear, incidents and a lobby. Read `## The field`
+and `## The lobby` before touching either - both grew from much smaller
+versions and most of the traps below are the seams where they did.
+
 ## Environment quirks
 
 - **Node is not on PATH.** It lives in `~/.local/node/bin`. Every shell that
@@ -583,12 +588,12 @@ zoom, arrows to step through the field. `src/museum.js`.
   the plinth, the lights and the fog, because a rig placed for a 4.4 m car sits
   *inside* an 18 m truck and lights one wheel arch. Intensity rises with the
   square of the distance, since the falloff is inverse-square.
-- **All nine cars are on show, including the two that never race.** Guido and
+- **All twenty cars are on show, including the two that never race.** Guido and
   Mack carry `"racer": false` in `cars.json`, which keeps them off the grid and
   out of the car picker; the showroom is for looking at cars, and they are
   cars. Everything that builds a field uses `racerSpecs`, and the headless sim
-  tools filter the same way — a nine-car grid with an artic on it is not the
-  race any of them assert anything about.
+  tools filter the same way — a grid with an artic on it is not the race any of
+  them assert anything about.
 - A wide flat plinth lit from a sharp angle is the classic recipe for shadow
   acne - it showed as radial banding following the cylinder's triangulation,
   and wants a much bigger `normalBias` than the outdoor sun does.
@@ -890,12 +895,12 @@ once the lobby above has sent `MSG.START`.
 `src/net.js` is the protocol, `src/net/guest.js` the guest's view, and there
 are three transports behind one `send` / `onMessage` / `close` interface:
 `peer.js` (WebRTC through PeerJS's free broker), `loopback.js`
-(BroadcastChannel between two tabs, reached with `?net=loopback`) and
+(BroadcastChannel between several tabs, reached with `?net=loopback`) and
 `fake.js` (in-process, with latency and loss you choose).
-The host runs the real `Race` and owns the result; the guest sends buttons at
+The host runs the real `Race` and owns the result; each guest sends buttons at
 30 Hz and gets snapshots at 20 Hz. Everything talks through `send` /
 `onMessage` / `close` and nothing else, which is what lets the whole stack be
-tested headlessly - see `tools/check_netplay.mjs`.
+tested headlessly - see `tools/check_netplay.mjs` and `tools/check_lobby.mjs`.
 
 - **Both devices must lay out the same grid.** `Race.build(playerId, humanIds)`
   orders the humans by their place in `humanIds`, never by who is local.
@@ -988,6 +993,14 @@ grey tarmac and their grandstands contain green seats. The working route is:
 node tools/topdown.mjs raw/x.glb <id>   # colour + world-height + material-ID passes
 python3 tools/extract_oval.py <id>      # trace the ring off the ID mask
 node tools/refine_track.mjs <id>        # heights/banking/width by raycasting the shipped asset
+```
+
+Two more passes write into the same file afterwards, and both raycast the
+*shipped* asset rather than the raw one, so they go last:
+
+```
+node tools/extract_pits.mjs <id>        # the pit road, as a second ribbon
+node tools/extract_crowd.mjs <id>       # where the spectators sit
 ```
 
 The material-ID pass renders each material as a unique flat colour from
@@ -1184,14 +1197,13 @@ node tools/check_wheels.mjs        # every wheel found, and proof they turn
 node tools/check_steering.mjs      # does it steer, and does the field weave?
 node tools/check_racing.mjs        # how hard is it actually to overtake?
 node tools/check_effects.mjs       # clouds, crowd, tyre smoke, a wreck cooking
-node tools/extract_crowd.mjs      # ... and where the crowd goes, per circuit
 node tools/check_museum.mjs        # every car on the plinth, and the race after
 node tools/check_crashes.mjs       # rivals have incidents, and they are safe
 node tools/shots_crash.mjs <track> # ... and a picture of one at the roadside
 node tools/check_pits.mjs          # pit roads on asphalt, and a stop end to end
 node tools/shots_pits.mjs <track>  # ... and a picture of Guido doing it
 node tools/check_fullscreen.mjs    # rotate to landscape, and the tap fallback
-node tools/check_netplay.mjs       # host and guest agree, at four latencies
+node tools/check_netplay.mjs       # a host and two guests agree, at four latencies
 node tools/check_lobby.mjs         # four in a lobby, in one process
 node tools/check_twoplayer.mjs     # three real tabs through the real menus
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
@@ -1296,12 +1308,12 @@ What "good" looks like right now:
   and somebody is starting in the pits - `Material.107` in particular *is* the
   pit lane, and reading it here as a pass is how the whole field raced down it
   for a release.
-- `check_netplay.mjs` — both ends agree on the finishing order at every
-  latency, no car is ever drawn off the road, and the guest's own car sits
-  0.01 m from the host's answer in a room rising to 8.5 m at 300 ms. That last
-  figure is `2 x latency x speed` and is not a bug; it is what predicting
-  costs, and it is reported apart from the correction peaks so neither can
-  hide the other. **A photo finish is allowed to fall either way**: the guest
+- `check_netplay.mjs` — a host and *two* guests: all three ends agree on the
+  finishing order at every latency, no car is ever drawn off the road, and a
+  guest's own car sits about 0.5 m from the host's answer in a room, rising to
+  9 m at 300 ms. That last figure is `2 x latency x speed` and is not a bug; it
+  is what predicting costs, and it is reported apart from the correction peaks
+  so neither can hide the other. **A photo finish is allowed to fall either way**: the guest
   predicts its own car, so two cars finishing 0.05 s apart are inside that same
   round trip by an order of magnitude and no correct netcode can resolve them.
   What must never differ is a place that was actually decided.
@@ -1322,8 +1334,9 @@ What "good" looks like right now:
   8 s, because only the selected circuit loads - but *every* car does, and
   there are twenty of them at 3.9 MB. `assets/` totals ~14 MB; the
   420k-triangle Yoyleland model is 5.9 MB of that and only arrives if picked.
-  PeerJS is another 93 KB and only arrives if somebody taps 2 PLAYERS - keep it
-  that way.
+  PeerJS is another 93 KB and only arrives if somebody taps MULTIPLAYER - keep
+  it that way. The crowd rides along in the track data: about 40 KB of the
+  circuit's JSON, and only for the circuit being raced.
   `loadTrackById` disposes the previous track — do not start caching all three
   on a phone.
 
@@ -1361,11 +1374,19 @@ build id matches, rather than assuming the deploy took.
 - Comments explain *why*, especially where the code looks odd because of a
   model quirk. Several of the traps above are duplicated as comments at the
   exact line that would otherwise get "simplified" back into a bug.
-- Test at real phone sizes: 667×375, 844×390, 915×412. The options panel must
-  fit with no scrolling — it once pushed BACK off the bottom of the screen and
-  the owner concluded a feature was missing.
+- Test at real phone sizes: 667×375, 844×390, 915×412. **The last button on a
+  panel must stay on the screen.** It has been broken three times now - the
+  options panel pushed BACK off the bottom and the owner concluded a feature
+  was missing; eighteen finishers pushed RACE AGAIN off; and the lobby's six
+  host controls pushed RACE off. The answer each time is the same: give the
+  list that can grow its own `max-height` and `overflow-y`, and never let the
+  panel itself do the scrolling.
 - Touch targets are sized for a small child; the `.ctl` floor is 68 px.
-- No audio files. Engines, tyres, crowd and the start lights are synthesised in
-  `src/audio.js`. Keep it that way — it is zero bytes and zero licensing.
+- **Nothing is downloaded that can be drawn or synthesised.** Engines, tyres,
+  the crowd noise and the start lights are oscillators in `src/audio.js`; the
+  sky, the smoke sprite, the spectators, the contact shadows, the pit boxes and
+  the museum plinth are all canvases and generated geometry. Keep it that way —
+  it is zero bytes and zero licensing, and it is why a session is 5 MB rather
+  than 15.
 - Copyright is explicitly not a concern here: private family project, models
   are CC-BY Sketchfab uploads, attribution is in the README.

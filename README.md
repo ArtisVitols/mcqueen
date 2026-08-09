@@ -1,24 +1,24 @@
 # McQueen Speedway
 
-A 3D oval racing game for a phone browser, built for a five-year-old. Drive
-Lightning McQueen against six rivals from *Cars* around one of three
-NASCAR-style speedways - on your own, or against somebody on a second phone.
+A 3D oval racing game for a phone browser, built for a five-year-old. Take any
+of eighteen cars from *Cars* around one of three NASCAR-style speedways - on
+your own, or with up to three other people on their own phones.
 
 **Play: https://artisvitols.github.io/mcqueen/**
 
-Open it on a phone, turn the phone sideways, tap START. To race someone else,
-tap 2 PLAYERS instead - see below.
+Open it on a phone, turn the phone sideways, tap START. To race other people,
+tap MULTIPLAYER instead - see below.
 
 ## How it plays
 
 - Left thumb: ◀ ▶ steer. Right thumb: ▲ gas, ▼ brake.
-- Five red lights, then green, then three laps. Lap counter is top right.
+- Five red lights, then green, then five laps. Lap counter is top right.
 - OPTIONS sets your car, the circuit, handling, laps (2/5/10/15/20),
   difficulty, graphics quality and sound.
 - Difficulty is **Easy** by default: holding the throttle down is enough to
-  win, whichever handling model is picked. Normal is close, Hard beats a
-  flat-out player. Once one of them gets past you it keeps that extra pace for
-  about fifteen seconds and then settles back down, so you get another go.
+  win, whichever handling model is picked. See below for what the other two do.
+  Once a rival gets past you it keeps that extra pace for about fifteen seconds
+  and then settles back down, so you get another go.
 - The wheels turn at road speed, the front pair steers, and the body leans into
   the corners and noses down under braking.
 - Turn the phone to landscape and it goes fullscreen; if the browser wants a
@@ -188,7 +188,15 @@ Everything else is a static site: vanilla ES modules, three.js vendored into
 `vendor/`, no build step, no runtime dependencies.
 
 Sound is synthesised with WebAudio - engines, tyre squeal, crowd and the start
-lights are all oscillators and filtered noise. No audio files are downloaded.
+lights are all oscillators and filtered noise. No audio files are downloaded,
+and the same rule holds for the pictures: the clouds, the tyre smoke, the
+spectators, the shadows under the cars and the yellow pit boxes are all drawn
+by the game as it starts rather than shipped as files.
+
+Where the spectators *sit*, though, is measured rather than guessed -
+`tools/extract_crowd.mjs` raycasts the stadium model and writes the seats into
+the track data, because a band of people placed by eye ends up in mid-air on
+one circuit and inside the concrete on another.
 
 ## Layout
 
@@ -203,8 +211,11 @@ src/pitstop.js                  driving in, stopping, being serviced, leaving
 src/pitcrew.js                  Guido going round the wheels, and Mack parked
 src/museum.js                   the showroom
 src/ai.js                       opponent drivers: lanes, drafting, grudges
-src/race.js                     grid, countdown, running order, finish
-src/net.js, src/net/            two-player protocol and its three transports
+src/race.js                     grid, countdown, running order, incidents, finish
+src/sky.js                      the clouds, drawn into a canvas at startup
+src/smoke.js                    tyre smoke and a wreck's engine, one Points pool
+src/crowd.js                    the spectators, one Points pool per circuit
+src/net.js, src/net/            the protocol, the lobby and three transports
 src/main.js                     renderer, camera, menus, game loop
 src/{input,hud,audio,models,settings}.js
 assets/                         compressed models + extracted track data
@@ -231,6 +242,7 @@ node  tools/topdown.mjs raw/x.glb palm     # -> build/palm_{colour,height,id}.pn
 python3 tools/extract_oval.py palm         # -> assets/track-palm.json
 node  tools/refine_track.mjs palm          # heights/banking by raycasting the asset
 node  tools/extract_pits.mjs palm          # ... and its pit road, as a second ribbon
+node  tools/extract_crowd.mjs palm         # ... and where its spectators sit
 
 python3 tools/inspect_track.py raw/x.glb   # materials, scale, overhead map
 node  tools/probe_points.mjs raw/x.glb 1,2 # what is actually at a world point
@@ -243,12 +255,15 @@ node  tools/check_wheels.mjs       # every wheel found, and proof they turn
 node  tools/check_steering.mjs     # does it steer, and does the field weave?
 node  tools/check_racing.mjs       # how hard is it actually to overtake?
 node  tools/check_museum.mjs       # every car on the plinth, and the race after
-node  tools/check_effects.mjs      # clouds, tyre smoke, and a wreck cooking
+node  tools/check_effects.mjs      # clouds, crowd, tyre smoke, a wreck cooking
 node  tools/check_crashes.mjs      # rivals have incidents, and they are safe
 node  tools/check_pits.mjs         # pit roads on asphalt, and a stop end to end
 node  tools/shots_pits.mjs yoyle   # ... and a picture of Guido doing it
+node  tools/check_grid.mjs         # what surface each starting slot sits on
+node  tools/check_barriers.mjs     # walls inside the corridor, holes under a wheel
+node  tools/test_pause.mjs         # the pause menu, and panels that fit a phone
 node  tools/check_fullscreen.mjs   # rotate to landscape, and the tap fallback
-node  tools/check_netplay.mjs      # host and guest agree, at four latencies
+node  tools/check_netplay.mjs      # a host and two guests agree, at four latencies
 node  tools/check_lobby.mjs        # four in a lobby, in one process
 node  tools/check_twoplayer.mjs    # three real tabs through the real menus
 node  tools/shots.mjs              # drive the real game in headless Chrome
@@ -259,8 +274,17 @@ node  tools/shots_tracks.mjs       # ... on every circuit
 renderer - every handling model against every circuit at every difficulty, plus
 a two-player grid - and asserts that every car completes the right number of
 laps, nobody leaves the racing surface, overtakes happen, and each difficulty
-lands where it should. Easy has to be a win on all of them. `tools/smoke.html` checks every asset loads and each car normalises to
-its real-world size.
+lands where it should. Easy has to be a win on all of them.
+
+The network stack is tested the same way. `check_lobby.mjs` runs a host and
+three guests in one process over fake links; `check_netplay.mjs` races a host
+and two guests at four latencies and packet-loss rates; `check_twoplayer.mjs`
+drives three real browser tabs through the real menus. All of them use the
+loopback or in-process transports, so a green run says nothing about the public
+broker - only real phones can test that.
+
+`tools/smoke.html` checks every asset loads and each car normalises to its
+real-world size.
 
 ## Credits
 
@@ -270,11 +294,19 @@ family project:
 - **Lightning McQueen** — [Guilherme Navarro](https://sketchfab.com/3d-models/lightning-mcqueen-cars-987dfeaab6e84bc094b707e77c96f45d)
 - **Yoyleland International Speedway** — [RedUnLuckyBlockOSC](https://sketchfab.com/3d-models/yoyleland-international-speedway-nascar-x-bfdi-c6aa0b11a789415b8fe7b2ac8a122db1)
 - **Motor Speedway of the South** and **Palm Mile Speedway** are likewise
-  Sketchfab community uploads of the Cars circuits
-- Chick Hicks, The King, Francesco Bernoulli, Jackson Storm, Mater and Doc
-  Hudson are likewise Sketchfab community uploads.
+  Sketchfab community uploads of the Cars circuits.
+- The rest of the grid is likewise Sketchfab community uploads: Chick Hicks,
+  The King, Francesco Bernoulli, Jackson Storm, Mater, Doc Hudson, Cruz
+  Ramirez, Sally Carrera, Shu Todoroki, Carla Veloso, Claude Scruggs, Darrell
+  Cartrip, Michael Schumacher, Finn McMissile, Sarge, Fillmore and Ivy - plus
+  Guido and Mack, who work in the pits rather than race.
+
+Every one of them is pulled from a Google Drive folder by
+`tools/fetch_assets.sh`; the file ids are in there, and `raw/` is gitignored,
+so only the compressed output in `assets/` is committed.
 
 *Cars* and its characters are trademarks of Disney/Pixar. This is a fan project
 made for one kid, not affiliated with or endorsed by Disney or Pixar.
 
-three.js is MIT licensed — see `vendor/three/LICENSE`.
+three.js is MIT licensed — see `vendor/three/LICENSE`, and PeerJS likewise —
+see `vendor/peerjs/README.md`.
