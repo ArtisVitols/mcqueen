@@ -27,6 +27,10 @@ const CONNECT_TIMEOUT = 20000;
 // A free slot answers "peer-unavailable" almost at once, so a probe that has
 // not resolved by now is a room nobody is holding.
 const PROBE_TIMEOUT = 4500;
+// How long a room that has *opened* is given to send its advert before it is
+// listed without one. The lobby message normally arrives in the same breath;
+// this only covers it being dropped, since the channel is unreliable.
+const ADVERT_GRACE = 1200;
 
 let loading = null;
 
@@ -110,6 +114,17 @@ export async function host(onStatus = () => {}) {
   }
 
   onStatus('waiting');
+  // A room must not evaporate over something routine. `peer-unavailable` here
+  // is somebody else's problem - an id we were asked about that nobody holds -
+  // and even a broker wobble is survivable, because the guests already
+  // connected are talking phone to phone by now. Report it; do not tear the
+  // room down. (Before this, *any* error destroyed the peer while the screen
+  // went on showing a room number that no longer existed.)
+  peer.on('error', (err) => {
+    if (err?.type === 'peer-unavailable') return;
+    onStatus(asPlainError(err).message);
+  });
+
   let onGuest = null;
   peer.on('connection', (conn) => {
     conn.on('open', () => onGuest?.(wrap(conn, peer, false)));
@@ -122,20 +137,46 @@ export async function host(onStatus = () => {}) {
   };
 }
 
-/** A peer with a fixed id, or the broker's reason for saying no. */
+/**
+ * A peer with a fixed id, or the broker's reason for saying no.
+ *
+ * **Both handlers come off again the moment this settles, and that is the
+ * whole point of the function.** The error handler destroys the peer, which is
+ * right while we are still waiting to be let in and catastrophic afterwards:
+ * PeerJS reports a great many *routine* things through `error`, and
+ * `peer-unavailable` - "nobody is holding that id" - is one of them. Left
+ * bound, it meant a guest knocking on eight rooms destroyed its own peer on
+ * the first empty one, taking down the probe of the room that was live. The
+ * broker answers "nobody there" in one round trip while a real host needs a
+ * whole ICE handshake, so the empty slots always answered first and JOIN never
+ * found anything. `check_rooms.mjs` is that failure, written down.
+ */
 function openPeer(Peer, id) {
   return new Promise((resolve, reject) => {
     const peer = new Peer(id, { debug: 0 });
-    const timer = setTimeout(() => {
-      try { peer.destroy(); } catch { /* fine */ }
-      reject(new Error('the lobby did not answer'));
-    }, CONNECT_TIMEOUT);
-    peer.on('open', () => { clearTimeout(timer); resolve(peer); });
-    peer.on('error', (err) => {
+    let timer = null;
+    let settled = false;
+    const settle = (fn, arg) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      peer.off('open', onOpen);
+      peer.off('error', onError);
+      fn(arg);
+    };
+    const onOpen = () => settle(resolve, peer);
+    const onError = (err) => {
+      // Only while opening. Failing to take an id leaves nothing worth
+      // keeping, so the peer goes with it.
       try { peer.destroy(); } catch { /* fine */ }
-      reject(err);
-    });
+      settle(reject, err);
+    };
+    timer = setTimeout(() => {
+      try { peer.destroy(); } catch { /* fine */ }
+      settle(reject, new Error('the lobby did not answer'));
+    }, CONNECT_TIMEOUT);
+    peer.on('open', onOpen);
+    peer.on('error', onError);
   });
 }
 
@@ -156,23 +197,64 @@ export async function list(onRoom, onStatus = () => {}) {
   const peer = await openPeer(Peer, undefined).catch((err) => { throw asPlainError(err); });
 
   const open = new Map();
+  const giveUp = new Map();       // room -> stop waiting on it
+  // **A free slot answers on the *peer*, not on the connection**, so this is
+  // the only place an empty room can be told from a slow one. PeerJS names the
+  // id it could not reach in the message, which is how the answer gets back to
+  // the probe that asked. Anything that is not `peer-unavailable` is the
+  // broker itself failing, and then none of the eight will ever answer.
+  peer.on('error', (err) => {
+    if (err?.type === 'peer-unavailable') {
+      const at = /-room-(\d+)\b/.exec(err.message || '');
+      // If the id cannot be read out of the message, give up on *nothing* and
+      // let the per-probe timeout do it. Cancelling them all would be the
+      // original bug wearing a hat: one empty slot killing the live room.
+      if (at) giveUp.get(+at[1])?.();
+      return;
+    }
+    for (const stop of giveUp.values()) stop();
+  });
+
   const probes = [];
   for (let n = 1; n <= ROOM_SLOTS; n++) {
     probes.push(new Promise((resolve) => {
       const conn = peer.connect(roomId(n), { reliable: false });
-      const timer = setTimeout(() => { try { conn.close(); } catch { /* fine */ } resolve(); },
-        PROBE_TIMEOUT);
-      // The first thing a live host says is its lobby; that is the advert.
-      conn.on('data', (hello) => {
-        if (open.has(n)) return;
+      let timer = null;
+      let grace = null;
+      let done = false;
+      const stop = () => {
+        if (done) return;
+        done = true;
         clearTimeout(timer);
+        clearTimeout(grace);
+        try { conn.close(); } catch { /* fine */ }
+        resolve();
+      };
+      const report = (hello) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        clearTimeout(grace);
         const link = wrap(conn, peer, false);
         open.set(n, link);
         onRoom({ room: n, link, hello });
         resolve();
+      };
+      giveUp.set(n, stop);
+      timer = setTimeout(stop, PROBE_TIMEOUT);
+      // The first thing a live host says is its lobby; that is the advert, and
+      // it is what fills in the car and the player count.
+      conn.on('data', report);
+      // **A room that accepts a connection is a live room**, advert or no
+      // advert. This channel is unreliable on purpose - it becomes the race
+      // link - so hanging the whole listing on one packet arriving is a game
+      // that intermittently cannot be found. Wait a moment for the advert,
+      // then list it anyway.
+      conn.on('open', () => {
+        if (!done) grace = setTimeout(() => report(null), ADVERT_GRACE);
       });
-      conn.on('error', () => { clearTimeout(timer); resolve(); });
-      conn.on('close', () => { clearTimeout(timer); resolve(); });
+      conn.on('error', stop);
+      conn.on('close', stop);
     }));
   }
   await Promise.all(probes);
@@ -193,10 +275,23 @@ export async function join(room, onStatus = () => {}) {
   onStatus('knocking');
   const conn = peer.connect(roomId(room), { reliable: false });
   return new Promise((resolve, reject) => {
+    let settled = false;
+    // Unbound once this settles, for the same reason `openPeer` unbinds its
+    // own: after the link is up, `peer-unavailable` is routine traffic and
+    // must not reach back into the handshake that has already finished.
+    const settle = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      peer.off('error', onError);
+      fn(arg);
+    };
+    const onError = (err) => settle(reject, asPlainError(err));
     const timer = setTimeout(
-      () => reject(new Error(`nobody answered in room ${room}`)), CONNECT_TIMEOUT);
-    conn.on('open', () => { clearTimeout(timer); resolve(wrap(conn, peer)); });
-    peer.on('error', (err) => { clearTimeout(timer); reject(asPlainError(err)); });
+      () => settle(reject, new Error(`nobody answered in room ${room}`)),
+      CONNECT_TIMEOUT);
+    conn.on('open', () => settle(resolve, wrap(conn, peer)));
+    peer.on('error', onError);
   });
 }
 

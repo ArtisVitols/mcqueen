@@ -971,6 +971,34 @@ drives it in one process.
   deciding whether to seat it. So the advert a room shows in the list is the
   lobby state, there is no second protocol for browsing, and the connection to
   the room you pick is the one you play on.
+- **A PeerJS `error` is not a failure, and taking it for one broke JOIN
+  entirely.** `peer-unavailable` - nobody is holding that id - is how a *free
+  slot* answers, and PeerJS raises it through `emitError`, which only emits;
+  the fatal path is `_abort`. `openPeer` bound a handler that destroyed the
+  peer and never unbound it once the peer was open, so a guest knocking on
+  eight rooms destroyed its own peer on the first empty one and took the probe
+  of the live room down with it. The broker says "nobody there" in one round
+  trip while a real host needs a whole ICE handshake, so the empty slots always
+  answered first: **no games found, every time, with a host sitting right
+  there.** Unbind on settle; treat `peer-unavailable` as data.
+- **A free slot answers on the *peer*, not on the connection.** There is no
+  `conn.on('error')` for "that id does not exist", which is why the empty slots
+  used to sit out the full probe timeout. The id is named in the message
+  (`Could not connect to peer mcqueen-speedway-room-3`), and that is the only
+  way to tell which probe just failed. If it cannot be read, give up on
+  *nothing* and let the per-probe timeout do it - cancelling them all is the
+  original bug wearing a hat.
+- **A room that accepts a connection is a live room, advert or no advert.** The
+  lobby channel is `reliable: false`, because it becomes the race link, so
+  hanging the listing on one packet arriving is a game that intermittently
+  cannot be found. `ADVERT_GRACE` waits a moment for the lobby message and then
+  lists the room without it; `roomRow` already draws a nameless room.
+- **`check_rooms.mjs` is the only test of any of this.** `check_lobby` drives
+  fake links and `check_twoplayer` loopback, and both start *after* a
+  connection exists - so every line of `net/peer.js` was unexercised, and it
+  shipped broken. It fakes PeerJS closely enough to matter: errors land on the
+  peer, `peer-unavailable` is non-fatal, and a live room answers slower than a
+  dead one. It still says nothing about the real broker.
 - **The host owns the lobby exactly as it owns the race.** Guests send intents
   - pick this car, I am ready - and draw whatever the last `MSG.LOBBY` said.
   Asking for a car somebody has taken is *refused*, and the refusal arrives as
@@ -1318,6 +1346,7 @@ node tools/shots_pits.mjs <track>  # ... and a picture of Guido doing it
 node tools/check_fullscreen.mjs    # landscape, the tap fallback, and Back
 node tools/check_netplay.mjs       # a host and two guests agree, at four latencies
 node tools/check_lobby.mjs         # four in a lobby, in one process
+node tools/check_rooms.mjs         # can JOIN actually find a hosted room?
 node tools/check_twoplayer.mjs     # three real tabs through the real menus
 node tools/trace_lap.mjs <t> <phys> # why a lap was slow, half-second by half-second
 node tools/cross_section.mjs <t>   # what surface is under each lane, per station
