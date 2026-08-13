@@ -300,8 +300,8 @@ told apart by reading the tuning table.
   mechanism working. `check_racing` asserts the player beats everything within
   four fifths of that distance, and prints where they finished.
 - There is a floor (`CONCEDE_FLOOR`) and the pits are excluded, or a player
-  crawling down the pit lane at 79 km/h would have the whole field crawling
-  with them.
+  held to the pit limit - or sat still in their box being serviced - would
+  have the whole field waiting for them.
 
 ## Rivals that fight back
 
@@ -716,7 +716,7 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   other.
 - **Stop by braking on the distance remaining**, `sqrt(2·a·left)`, so the car
   arrives at rest on the mark. "Close enough, then brake" left it up to 3.5 m
-  short of a painted rectangle you can see; the curve puts it within 4 cm.
+  short of a painted rectangle you can see; the curve puts it within 2 cm.
 - **Aim at the box from the moment of entry.** `laneSteer` asks for a crossing
   *rate*, so a car that brakes first and moves over second never moves over at
   all: it stopped at n = +3.2 with its box at -3.4, could not steer at zero
@@ -802,7 +802,7 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   written when cars still arrived at the entrance flat out.
   - **Brake on the approach instead** (`Race.aimForPits` sets `car.pitCap`).
     Eighteen cars strung over two hundred metres at 250 km/h become eighteen
-    cars in sixty-five metres of pit lane at 79, and no queueing *inside* the
+    cars in sixty-five metres of pit lane at the limit, and no queueing *inside* the
     lane can undo a threefold compression that has already happened.
   - **The entry window is per car**, because it depends on where that car's box
     is. One window has to be short enough for whoever stops first, and a window
@@ -811,10 +811,12 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   - **`ENTRY_CLEAR` is the following distance the queue then holds**, not more.
     Below it a car joins already too close and closes the rest itself; well
     above it, everybody waits a lap.
-  - What that buys: nine to thirteen of eighteen turn in *on the same lap*, and
-    the rest on the next. `check_pits` asserts it, because the failure was
-    invisible in every other number - the race finished, everybody stopped,
-    nothing overlapped.
+  - What that buys: thirteen to eighteen of eighteen turn in *on the same
+    lap*, and any that are left on the next. `check_pits` asserts it, because
+    the failure was invisible in every other number - the race finished,
+    everybody stopped, nothing overlapped. (It was nine to thirteen until the
+    queue stopped crawling: a lane that runs at its limit clears faster, so
+    more of the field fits through the same window.)
 - **A brush is the price of letting the field in.** The 0.1 m overlap bar was
   met by turning almost everybody away at the entrance. It is 1.3 m now, and
   that is the right way round.
@@ -840,8 +842,8 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   `Driver.update` every step and written only by `Race.aimForPits` - which was
   only *called* while a car wanted to come in. So the last value it wrote
   stood: a rival that had pitted has `tyre = 1`, `shouldPit` goes false,
-  nothing clears the cap, and it aims at 22 m/s of a possible 87 from its stop
-  to the flag. Eighteen of them. The race still finished, everybody still got
+  nothing clears the cap, and it aims at 22 m/s - the pit limit of the day -
+  of a possible 87, from its stop to the flag. Eighteen of them. The race still finished, everybody still got
   served, nothing left the road - **not one existing assertion moved.**
   `aimForPits` now takes a `want` flag and is called unconditionally, the way
   `concede` always was, and `PitLane.leave` clears the cap beside
@@ -861,11 +863,14 @@ round the four wheels before you rejoin. **Mack** is parked by the wall.
   Speedway's first box is 150 m down the lane, so the whole benefit went into a
   longer braking zone instead of the clock. `pitSpeed` in `tracks.json`
   overrides it per circuit; nothing needs one today.
-- **Turning in needs room to stop in, not just room to fit.** A car enters at
-  racing speed and the limiter takes a second to bring it down, so a lane with
-  a stationary queue thirty metres in is a collision however hard it then
-  brakes. `tryEnter` refuses unless `ENTRY_SECONDS` of the car's *own speed* is
-  clear ahead - and refusing costs a lap, which is the cheaper mistake.
+- **Turning in used to need room to *stop* in, and that rule is gone.** The
+  reasoning was sound while cars arrived at the entrance flat out: a lane with
+  a stationary queue thirty metres in is a collision however hard you then
+  brake, so `tryEnter` refused unless the car's own stopping distance was
+  clear. It is what turned fifteen of eighteen away every lap. They are braked
+  on the approach now (`Race.aimForPits`), so they arrive at the pit limit and
+  the gate is a following distance - `ENTRY_CLEAR`, a flat nine metres. There
+  is no `ENTRY_SECONDS`; if you find one in a comment it predates this.
 - **"It has stopped" is not "it has arrived".** The anti-deadlock rule that
   services a car which cannot creep the last metre onto its mark also serviced
   one the queue had halted a hundred metres short - frozen mid-road with the

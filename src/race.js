@@ -561,10 +561,10 @@ export class Race {
     //
     // This is what a pit road entry is for, and leaving it out was the whole
     // problem: eighteen cars strung over two hundred metres of track at 250
-    // km/h become eighteen cars in sixty-five metres of pit lane at 79, and no
-    // amount of queueing inside the lane can undo a threefold compression that
-    // has already happened. They arrive on top of each other because they were
-    // never asked to slow down.
+    // km/h become eighteen cars in sixty-five metres of pit lane at the limit,
+    // and no amount of queueing inside the lane can undo a threefold
+    // compression that has already happened. They arrive on top of each other
+    // because they were never asked to slow down.
     //
     // The earlier answer - refuse entry unless the lane ahead is clear - kept
     // them apart by keeping them *out*: two or three cars a lap got in and the
@@ -676,8 +676,9 @@ export class Race {
     const off = this.tuning.concede;
     if (!off || car.finished) return;
     for (const human of this.humans) {
-      // Not while they are in the pits: a car crawling down the pit lane at
-      // 79 km/h would have the whole field crawling with it.
+      // Not while they are in the pits: a car held to the pit limit - or sat
+      // stationary in its box being serviced - would have the whole field
+      // waiting for it.
       if (human.finished || human.onPit) continue;
       if (human.lap < this.totalLaps) continue;
       // Everybody, not only whoever happens to be ahead at this instant.
