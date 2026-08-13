@@ -19,6 +19,9 @@ tap MULTIPLAYER instead - see below.
   win, whichever handling model is picked. See below for what the other two do.
   Once a rival gets past you it keeps that extra pace for about fifteen seconds
   and then settles back down, so you get another go.
+- **Tuck in behind another car and you pick up a tow** - a few km/h more than
+  you could manage on your own, worth most right behind them and gone once you
+  pull out. It is how you get a run on somebody down the straight.
 - The wheels turn at road speed, the front pair steers, and the body leans into
   the corners and noses down under braking.
 - Turn the phone to landscape and it goes fullscreen; if the browser wants a

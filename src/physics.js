@@ -141,6 +141,32 @@ export function tyreSpeed(car) {
   return TYRE_PACE + (1 - TYRE_PACE) * t;
 }
 
+/** The most a full tow is worth, as a fraction of the rev limiter. */
+const DRAFT_PACE = 0.07;
+
+/**
+ * What sitting in somebody's tow is worth in a straight line.
+ *
+ * **A human needs this on the *limiter*, not on the drag.** The AI has had a
+ * tow all along - `ai.js` scales its target speed by the same 7% - and it can
+ * use it because it cruises below its rev limiter and has headroom. A person
+ * holding the throttle down sits *at* the limiter, so shaving the drag term
+ * changes how fast they get there and not where they end up: the car simply
+ * runs into the same ceiling and nothing happens. Under Arcade it was worse
+ * still, because that model has no drag reduction at all - `car.draft` reached
+ * nothing, and Arcade is the default.
+ *
+ * Applied in `Car.step` beside `tyreSpeed`, through the one line every model
+ * shares, so a slipstream works the same whichever one is selected and no
+ * handling model has to know about it.
+ *
+ * Only humans have `car.draft` set - `Race.updateDraft` is called for them and
+ * nobody else - so this leaves the AI's own pacing exactly as it was.
+ */
+export function draftSpeed(car) {
+  return 1 + DRAFT_PACE * (car.draft || 0);
+}
+
 function gripLimit(v, bank, assist = 1) {
   const mu = (MU_MECH + MU_AERO * (v / V_AERO) ** 2) * assist;
   // Standard banked-corner limit. It genuinely goes to infinity once

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PHYSICS, tyreSpeed } from './physics.js';
+import { PHYSICS, tyreSpeed, draftSpeed } from './physics.js';
 
 /**
  * A car in track space.
@@ -145,7 +145,10 @@ export class Car {
     // Here rather than in a model because every model shares this line, and
     // because the model that most needs it - Arcade - has no tyres in it at
     // all. See tyreSpeed.
-    const top = this.topSpeed * tyreSpeed(this);
+    // ... and what a tow is worth. A car tucked in behind another runs a few
+    // km/h faster than it otherwise could, which is what makes a pass off the
+    // corner possible rather than a hopeful lunge. See draftSpeed.
+    const top = this.topSpeed * tyreSpeed(this) * draftSpeed(this);
     if (this.speed > top) {
       this.speed += (top - this.speed) * Math.min(1, dt * 3);
     }

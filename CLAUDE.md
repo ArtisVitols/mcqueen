@@ -177,6 +177,22 @@ is the old code moved verbatim, so its race pacing is unchanged and the
   always reel them in and get by, and only shows its real speed once you are
   ahead - which is what the owner asked for, and better racing than a rival
   that is simply faster than you everywhere and therefore gone.
+- **A person's slipstream has to reach the *limiter*, not the drag.** The AI
+  has had a tow since the beginning - `ai.js` scales its target speed by 7% of
+  how deep in the wake it is - and it can spend it because it cruises below its
+  rev limiter and has headroom. A human holding the throttle down sits *at* the
+  limiter, so the drag reduction the Sport and Pro models apply changes how
+  fast they reach the same ceiling and not where they end up: the car runs into
+  the identical wall either way. Under Arcade it was worse still, because that
+  model has no drag term to reduce - `car.draft` was computed for the player
+  every step and read by nothing, and Arcade is the default. `draftSpeed` sits
+  beside `tyreSpeed` in `Car.step`, the one line every model shares, and is
+  worth up to 9 km/h. Same shape as the worn-tyre penalty, and for the same
+  reason. It **only reaches humans**, because `Race.updateDraft` is only called
+  for them, so no AI pacing moved. Measured: passes on Arcade went 22 to 27 on
+  Normal and 13 to 20 on Hard, and the time to convert a duel fell about a
+  fifth. **The guest computes its own**, or it predicts a slower car than the
+  host is running and is corrected forwards on every straight.
 - **`car.baseSpeed` and `car.topSpeed` are different numbers.** The first is
   what the AI aims at and scales by its grudge; the second is the rev limiter
   in `Car.step`, which clamps whatever anybody asked for. Setting the limiter

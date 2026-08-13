@@ -227,6 +227,11 @@ export class GuestView {
     if (!car.finished && !car.onPit && race.state === State.RACING) {
       input.applyTo(car, dt, race.physics);
       race.driverAidFor?.(car, dt);
+      // The tow, computed here as well as on the host. It lifts the rev
+      // limiter (see `draftSpeed`), so a guest that did not work it out for
+      // itself would predict a slower car than the host is running and spend
+      // every straight being corrected forwards.
+      race.updateDraft(car);
       car.step(dt);
     }
 

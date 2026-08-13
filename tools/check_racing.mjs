@@ -31,7 +31,7 @@ import * as THREE from 'three';
 
 import { Track } from '../src/track.js';
 import { Race, State } from '../src/race.js';
-import { PHYSICS, laneSteer } from '../src/physics.js';
+import { PHYSICS, laneSteer, tyreSpeed, draftSpeed } from '../src/physics.js';
 import { DIFFICULTY } from '../src/settings.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -326,6 +326,45 @@ for (const spec of tracks) {
          `${gone ? `, ${gone} already home` : ''}`)
     : fail(`${spec.short}: ${lost.length} car(s) within ${reach.toFixed(0)} m still beat the ` +
            `player (finished P${player.place})`);
+}
+
+// ------------------------------------------------------------ the tow --
+//
+// **A person gets a slipstream, and it has to reach the rev limiter.**
+//
+// The AI has had one all along - `ai.js` scales its target speed by the same
+// figure - and it can spend it because it cruises below its limiter. A human
+// holding the throttle sits *at* the limiter, so the drag reduction the Sport
+// and Pro models apply changes how fast they reach the same ceiling and not
+// where they end up. Under Arcade, the default, `car.draft` reached nothing at
+// all. This checks the thing that was actually broken: that being in somebody's
+// tow raises what the car may do, under every model.
+console.log('\n=== the tow ===');
+for (const phys of Object.keys(PHYSICS)) {
+  const spec = TRACKS[0];
+  const track = new Track(read(`assets/${spec.data}`));
+  const entries = CARS.map((c) => ({ spec: c, object: new THREE.Object3D() }));
+  const race = new Race(track, entries, { difficulty: 'normal', laps: 3,
+    physics: phys, car: 'lightning_mcqueen' }, spec.gridLanes)
+    .build('lightning_mcqueen');
+  const car = race.player;
+  const ceiling = () => car.topSpeed * tyreSpeed(car) * draftSpeed(car);
+  car.draft = 0;
+  const free = ceiling();
+  car.draft = 1;
+  const towed = ceiling();
+  const gain = (towed - free) * 3.6;
+  gain > 5 && gain < 30
+    ? ok(`${phys}: a full tow is worth ${gain.toFixed(1)} km/h ` +
+         `(${(free * 3.6).toFixed(0)} -> ${(towed * 3.6).toFixed(0)} km/h)`)
+    : fail(`${phys}: a full tow is worth ${gain.toFixed(1)} km/h - ` +
+           'the draft is not reaching the limiter');
+  // ... and it is the *human's*. The AI is paced through its own target speed
+  // and must not be given the boost twice.
+  const rival = race.field.find((c) => !c.isPlayer);
+  (rival.draft || 0) === 0
+    ? ok(`${phys}: rivals are not given it twice`)
+    : fail(`${phys}: a rival carries draft ${rival.draft}`);
 }
 
 console.log(failed ? `\n${failed} problem(s)` : '\novertaking gets harder with the difficulty');
