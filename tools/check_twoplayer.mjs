@@ -179,6 +179,20 @@ panels.every((p) => p.lobby && p.two && p.menu && p.controls)
   ? ok('every tab is showing the race, not a menu over it')
   : fail(`a panel is still up: ${JSON.stringify(panels)}`);
 
+// **The lap count is the host's, on every screen.** `hud.update` *clamps* the
+// lap it shows to the total it is handed, and it used to be handed the local
+// `settings.laps` - so a guest whose own OPTIONS said 5 while the host chose
+// 10 watched its counter stop at 5 and stay there for the rest of the race.
+const laps = await Promise.all(tabs.map((p) => p.evaluate(() => ({
+  total: document.getElementById('lap-total').textContent,
+  race: window.game.race.totalLaps,
+  cars: window.game.race.field.every((c) => c.totalLaps === window.game.race.totalLaps),
+}))));
+new Set(laps.map((l) => l.race)).size === 1
+  && laps.every((l) => String(l.race) === l.total && l.cars)
+  ? ok(`every tab is racing ${laps[0].race} laps and showing it`)
+  : fail(`the lap count differs between tabs: ${JSON.stringify(laps)}`);
+
 const grids = await Promise.all(tabs.map((p) => p.evaluate(() => ({
   role: window.game.net?.role,
   humans: window.game.race.humans.map((c) => c.spec.id),

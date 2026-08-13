@@ -1071,6 +1071,15 @@ tested headlessly - see `tools/check_netplay.mjs` and `tools/check_lobby.mjs`.
   on the device least able to afford the delay. `DROP_AFTER` went 5 -> 12 s for
   the same reason: five seconds is fine for "gone" and far too tight for
   "having a hard time".
+- **The silence clock starts when the pump does, not when the lobby last heard
+  from somebody.** A guest says nothing at all between pressing READY and its
+  own first input packet, and it cannot send that until it has built the race
+  and - on a circuit it did not already have - downloaded and parsed the track.
+  That is easily longer than `DROP_AFTER` on a phone, so the host evicted both
+  players the instant `startPump` began and handed their cars to the AI before
+  the lights went out. `check_twoplayer` caught it as "host with one human,
+  guests never started"; on real devices it would look like the other person
+  simply never arriving.
 - **Silence is the only reliable sign the other phone has gone.** A closed tab
   fires no event at all and a sleeping phone fires one far too late, so both
   ends watch a clock (`DROP_AFTER`) instead of trusting the transport. The
@@ -1101,6 +1110,59 @@ tested headlessly - see `tools/check_netplay.mjs` and `tools/check_lobby.mjs`.
   short-screen rule that hides it is scoped to `#options` for that reason -
   unscoped, the host sees a dead panel instead of "waiting for the other
   player" or an error.
+- **The guest interpolates on the *host's* clock, one snapshot behind, and
+  every part of that sentence was wrong once.** Playback used to be anchored on
+  the arrival time of the newest packet, so `t` was already 1 the instant it
+  landed: every frame after that extrapolated, hit the cap, froze, and jumped
+  when the next arrived. On the host - which is authoritative and never
+  interpolates - it looked perfect, so this only ever showed on the other
+  phone, which is exactly how it was reported. Measured as the frame-to-frame
+  change in a rival's step: **45 cm before, 0.1 cm after.**
+  - **One interval of delay, not two.** Only `prev` and `next` are kept, so the
+    buffer *is* one interval; ask for more and playback falls off the back of
+    it and freezes. Deeper jitter tolerance needs a deeper history, which is
+    not built.
+  - **The timeline is `msg.c`, accumulated.** Arrival times jitter, so
+    interpolating over them varies the replay rate packet by packet. The
+    snapshot *number* is perfectly smooth and wrong: it assumes the host sends
+    exactly every 1/SNAPSHOT_HZ, and it does not - `startPump` is a
+    `setInterval`, and even a fixed-step test loop lands on 7 frames of 1/120
+    rather than 6, because 6/120 is a hair under 1/20. That is a 14% error in
+    the replay rate, worse than the fault being fixed. The race clock measures
+    what actually elapsed - but it is **reset to zero when the lights go
+    green**, so it is accumulated into a monotonic timeline rather than used
+    raw, and a backwards step is charged one nominal interval.
+  - **The rate is trimmed, the position never is.** The error is measured only
+    when a packet arrives, because that is the one instant its right value is
+    known - playback should be on the older of the two snapshots, about to
+    traverse to the newer. Measuring every frame chases a target that jumps
+    once per packet, and the filter lagged half a cycle: `t` ran -0.44..0.42
+    instead of 0..1, froze the car for three frames of every six and jumped it
+    1.8 m.
+  - **Run-on past the newest packet is capped in time, not as a fraction of
+    the span.** As a fraction it grew with the gap, so the more a link lost the
+    further a car was thrown and the bigger the snap back. One interval of
+    run-on costs the same few metres however bad the link gets: mean stutter at
+    1% loss went 13 cm to 3 cm.
+  - **A packet older than the newest applied is dropped**, on the sequence
+    number `n` and never on `c` - see the reset above. Jitter reorders packets,
+    and taking one at face value winds the timeline backwards.
+- **`car.pit` is on the wire, not just `car.onPit`.** Guido is started by
+  `player.pit === 'service'`, so with only "in the pits or not" travelling, a
+  guest's own car never reached that state and the crew came out on the host's
+  screen and never on theirs.
+- **The HUD's lap total is `race.totalLaps`, never `settings.laps`.**
+  `hud.update` *clamps* the lap it displays to the total it is handed, so a
+  guest whose own OPTIONS said 5 while the host chose 10 watched its counter
+  stop at 5 and stay there. Same rule as everything else here: nothing in a
+  networked race may read a local setting. `resumeRace` is guarded for the same
+  reason - a guest that paused and resumed used to re-cut the race to its own
+  lap count.
+- **Multiplayer defaults to no driver aid.** `help` is the aid on a *human's*
+  car and on Easy it steers, brakes and overtakes for you - right for a
+  five-year-old racing the AI, and indistinguishable from "my car is driving
+  itself" when two people are racing. The lobby control still offers Lots for a
+  race against a child.
 - **A round trip of position is not a bug.** The guest applies a button now,
   the host applies it one latency later, and the snapshot correcting for it is
   another latency old, so the two versions sit `2 x latency x speed` apart:

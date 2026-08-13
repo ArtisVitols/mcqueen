@@ -108,6 +108,15 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
       id: GUEST_CARS[i], guest, link, remote, carOnHost,
       view: new GuestView(guest), input: scripted(2 + i), seq: 0,
       worst: 0, total: 0, samples: 0, outside: 0,
+      // How *smoothly* a rival moves on this guest's screen. Nothing here used
+      // to look, and the answer was "not at all": playback was anchored on the
+      // arrival time of the newest snapshot, so `t` was already 1 when it
+      // landed and every later frame extrapolated, clamped, froze, then jumped
+      // when the next one came. The host is authoritative and always smooth,
+      // so this only ever shows up on the other phone - which is exactly how
+      // it was reported.
+      lastStep: new Map(), lastS: new Map(), lastRoad: new Map(),
+      jerk: 0, jerkN: 0, worstJerk: 0,
     };
     link.a.onMessage((msg) => { if (msg.t === MSG.INPUT) remote.receive(msg.b, msg.q); });
     link.b.onMessage((msg) => { if (msg.t === MSG.SNAP) seat.view.receive(msg, link.now); });
@@ -130,11 +139,17 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
     sinceSnap += DT;
     const snap = sinceSnap >= 1 / SNAPSHOT_HZ;
     if (snap) sinceSnap = 0;
+    // **Built once and sent to everybody**, exactly as `startPump` does it.
+    // Calling `snapshot()` per seat gives each guest every *other* sequence
+    // number, so each one thinks half its packets were lost and runs its
+    // playback at half speed. A test that models the host wrongly measures
+    // its own mistake.
+    const payload = snap ? snapshot(host) : null;
     sinceInput += DT;
     const inputDue = sinceInput >= 1 / INPUT_HZ;
     if (inputDue) sinceInput = 0;
     for (const seat of seats) {
-      if (snap) seat.link.b.other.send(snapshot(host));       // host end -> guest
+      if (snap) seat.link.b.other.send(payload);              // host end -> guest
       if (inputDue) {
         seat.link.a.other.send(
           { t: MSG.INPUT, b: packButtons(seat.input.state), q: seat.seq++ });
@@ -150,13 +165,20 @@ function run({ track, physics, difficulty, latency, jitter, loss }) {
              / seats.length;
   const outside = seats.reduce((a, s2) => a + s2.outside, 0);
   const dropped = seats.reduce((a, s2) => a + s2.link.dropped, 0);
+  const jerk = seats.reduce((a, s2) => a + (s2.jerkN ? s2.jerk / s2.jerkN : 0), 0)
+             / seats.length;
+  const worstJerk = Math.max(...seats.map((s2) => s2.worstJerk));
+  // Did the phase of a stop reach the other end at all? Guido is started by
+  // it, and with only `onPit` on the wire a guest's own car was never
+  // `service` and the crew never came out on that phone.
+  const sawService = seats.some((s2) => s2.sawService);
 
   return {
     finished: host.state === State.FINISHED,
     order: host.order.map((c) => c.spec.id),
     guestOrders: seats.map((s2) => s2.guest.order.map((c) => c.spec.id)),
     hostTimes: host.order.map((c) => +(c.finishTime || 0).toFixed(2)),
-    worst, mean, outside, dropped, seconds: t,
+    worst, mean, outside, dropped, seconds: t, jerk, worstJerk, sawService,
   };
 }
 
@@ -173,11 +195,41 @@ function measure(seat, host, st) {
     // asks the question this metric is actually about - how far is the car I
     // am driving from where the host says it is - and it asks it the same way
     // on either road.
+    if (mine.pit === 'service') seat.sawService = true;
     const drift = mine.position.distanceTo(truth.position);
     if (host.state === State.RACING) {
       seat.worst = Math.max(seat.worst, drift);
       seat.total += drift;
       seat.samples++;
+    }
+
+    // Rival smoothness: how much the per-frame step *changes* from frame to
+    // frame. A car running at a steady speed should move by very nearly the
+    // same amount each frame, so this is near zero however fast it is going;
+    // stutter is precisely a step that keeps changing size.
+    if (host.state === State.RACING) {
+      for (const car of guest.field) {
+        // A car changing ribbon legitimately moves its `s` by hundreds of
+        // metres - it is a distance down a different road - so the run of
+        // samples restarts rather than reporting a 630 m step.
+        if (car === mine || car.onPit || car.out || seat.lastRoad.get(car) !== car.road) {
+          seat.lastRoad.set(car, car.road);
+          seat.lastS.delete(car);
+          seat.lastStep.delete(car);
+          continue;
+        }
+        const before = seat.lastS.get(car);
+        seat.lastS.set(car, car.s);
+        if (before === undefined) continue;
+        const step = guest.track.delta(before, car.s);
+        const wasStep = seat.lastStep.get(car);
+        seat.lastStep.set(car, step);
+        if (wasStep === undefined) continue;
+        const d = Math.abs(step - wasStep);
+        seat.jerk += d;
+        seat.jerkN++;
+        seat.worstJerk = Math.max(seat.worstJerk, d);
+      }
     }
 
     for (const car of guest.field) {
@@ -192,6 +244,33 @@ function measure(seat, host, st) {
       }
     }
 }
+
+/**
+ * Smoothness limits, in metres of frame-to-frame change in a rival's step.
+ *
+ * At 120 Hz a car at 70 m/s steps 58 cm a frame; what matters is that the step
+ * stays the *same size*, so on a clean link a healthy figure is a fraction of
+ * a centimetre - it measures 0.1 cm. They scale with **loss**, because that is
+ * the part no interpolator can fix: only two snapshots are ever buffered, so a
+ * packet that never arrives leaves an interval with no data in it, and the
+ * best available answer is to run on and resync. Latency and jitter cost
+ * nothing here, which is the point.
+ */
+const jerkMean = (loss) => 0.05 + loss * 12;
+/**
+ * The worst single frame is only asserted on a link that loses nothing.
+ *
+ * On one that does, the big numbers are not stutter, they are a **stall**: the
+ * guest buffers exactly two snapshots, so playback sits one send interval
+ * ahead of the newest data and any gap longer than that starves it. The car
+ * freezes at the run-on cap and then moves when the burst arrives. Smoothing
+ * that away needs a deeper buffer - keeping the last several snapshots and
+ * interpolating across whichever pair brackets the playback time - which is a
+ * real change and one only actual phones could judge. Not pretending a formula
+ * covers it; the mean above is asserted on every link and is what reads as
+ * smooth.
+ */
+const jerkWorst = 0.9;
 
 const CASES = [
   { label: 'same room',   latency: 0.005, jitter: 0.002, loss: 0 },
@@ -225,9 +304,10 @@ function orderAgrees(a, b, times, tol) {
   return true;
 }
 
-console.log('  link         rtt   loss  offset    peak   off-road   order   time');
+console.log('  link         rtt   loss  offset    peak   off-road  jerk   order   time');
 
 let failed = 0;
+let sawAnyService = false;
 for (const c of CASES) {
   for (const track of ['msots', 'palm']) {
     const r = run({ track, physics: 'arcade', difficulty: 'normal', ...c });
@@ -254,8 +334,10 @@ for (const c of CASES) {
                 `${(c.loss * 100).toFixed(0).padStart(4)}% ` +
                 `${r.mean.toFixed(2).padStart(6)} m ${r.worst.toFixed(1).padStart(6)} m ` +
                 `${String(r.outside).padStart(8)} ` +
+                `${(r.jerk * 100).toFixed(1).padStart(5)} ` +
                 `${(agree ? 'agree' : 'DIFFER').padStart(7)} ` +
                 `${r.seconds.toFixed(0).padStart(5)}s  ${track}`);
+    if (r.sawService) sawAnyService = true;
     if (!r.finished) { console.log('    ! the race never finished'); failed++; }
     if (r.mean > allowed) {
       console.log(`    ! the guest sits ${r.mean.toFixed(1)} m from authority on average ` +
@@ -268,6 +350,20 @@ for (const c of CASES) {
       failed++;
     }
     if (r.outside > 0) { console.log(`    ! a guest drew a car off the road ${r.outside} times`); failed++; }
+    // **How smoothly a rival moves on the other phone**, in centimetres of
+    // change in the per-frame step. A car at a steady speed should step by
+    // very nearly the same amount every frame however fast it is going, so
+    // this is near zero when interpolation is working and large when playback
+    // is running past the newest packet, freezing and jumping - which is what
+    // "the other cars are jerky" was. Generous enough for a real lane change
+    // and a shunt; the failure was an order of magnitude worse than this.
+    if (r.jerk > jerkMean(c.loss) || (!c.loss && r.worstJerk > jerkWorst)) {
+      console.log(`    ! rivals stutter on the guest: ${(r.jerk * 100).toFixed(1)} cm ` +
+                  `mean step change, worst ${(r.worstJerk * 100).toFixed(0)} cm ` +
+                  `(limit ${(jerkMean(c.loss) * 100).toFixed(0)} mean` +
+                  `${c.loss ? '' : `, ${jerkWorst * 100} worst`})`);
+      failed++;
+    }
     if (!agree) {
       console.log('    ! the ends disagree about a place that was decided');
       console.log(`      host:  ${r.order.join(' ')}`);
@@ -277,6 +373,13 @@ for (const c of CASES) {
     }
   }
 }
+
+// The phase of a stop has to reach the other end, or Guido never comes out on
+// the guest's phone - which is how it was reported. Checked once, across every
+// case, because whether a stop happens at all depends on the race.
+sawAnyService
+  ? console.log('\n  ok: a stop\'s phase reaches the guest, so the crew can work on it')
+  : console.log('\n  (no stop happened in these runs - service phase unchecked)');
 
 console.log(failed ? `\n${failed} problem(s)` : '\nall three ends agree at every latency');
 process.exit(failed ? 1 : 0);

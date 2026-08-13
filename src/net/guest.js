@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { readSnapshot } from '../net.js';
+import { readSnapshot, SNAPSHOT_HZ } from '../net.js';
 import { State } from '../race.js';
 
 /**
@@ -22,6 +22,40 @@ import { State } from '../race.js';
 
 const BLEND = 0.18;          // seconds to fold a correction in over
 const HARD_RESET = 25;       // metres of disagreement that means "just jump"
+/**
+ * How far behind the newest snapshot the rivals are drawn, in seconds.
+ *
+ * **Without this the guest never interpolates - it only ever extrapolates**,
+ * and that is what "the other cars are jerky" is. Anchoring playback at the
+ * arrival time of the newest packet means `t` is already 1 the instant it
+ * lands, so every frame after that runs *past* it, is clamped, freezes, and
+ * then jumps when the next one arrives. One snapshot interval of delay puts
+ * playback between two known states, where interpolation is what it says it
+ * is. Running on past the newest packet still happens - that is what stops a
+ * dropped one freezing the field - it is just no longer the normal case.
+ *
+ * The cost is that a rival is drawn one interval further behind: 50 ms, about
+ * 3.5 m at racing speed, on top of the round trip that was already there.
+ */
+const INTERP_DELAY = 1 / SNAPSHOT_HZ;
+/**
+ * How hard the playback clock's *rate* is trimmed to stay in step, and the
+ * most it may be trimmed by.
+ *
+ * The error is only ever measured **when a packet arrives**, because that is
+ * the one instant its correct value is known: playback should be at the older
+ * of the two snapshots, about to traverse to the newer. Measuring it every
+ * frame instead compares against a target that jumps forward once per packet,
+ * so a filter chasing it lags by half a cycle - which put `t` at -0.44..0.42
+ * instead of 0..1, froze the car for three frames of every six and then jumped
+ * it 1.8 m. Trimming the rate rather than the position means nothing is ever
+ * moved; it just runs a fraction fast or slow until it is back in step.
+ */
+const CLOCK_TRIM = 2.0;
+const MAX_TRIM = 0.15;
+// Beyond this much error there is no catching up smoothly - a long stall, or a
+// host that has been paused - so take the jump and start again.
+const CLOCK_RESET = 0.5;
 
 export class GuestView {
   constructor(race) {
@@ -30,6 +64,28 @@ export class GuestView {
     this.next = null;         // ... and the newest
     this.prevAt = 0;
     this.nextAt = 0;
+    // Playback runs on **host time**, not on arrival times and not on the
+    // snapshot number.
+    //
+    // Arrival times jitter with the network, so interpolating over them varies
+    // the replay rate packet by packet and reads as stutter even when nothing
+    // was lost. The snapshot *number* is perfectly smooth but assumes the host
+    // sends exactly every 1/SNAPSHOT_HZ, and it does not: `startPump` is a
+    // `setInterval` on a phone, and even a fixed-step test loop lands on 7
+    // frames of 1/120 rather than 6, because 6/120 is a hair under 1/20. That
+    // is a 14% error in the replay rate - worse than the problem being fixed.
+    //
+    // What is left is `msg.c`, the host's own race clock, which measures the
+    // time that actually elapsed between two snapshots. Its one flaw is that
+    // it is **reset to zero when the lights go green**, so it is accumulated
+    // into a monotonic timeline here rather than used raw.
+    this.prevClock = 0;
+    this.nextClock = 0;
+    this.lastC = null;        // the raw race clock of the newest snapshot
+    this.clock = 0;           // where playback has got to, in host time
+    this.trim = 0;            // rate correction, measured once per packet
+    this.seq = null;          // newest snapshot applied, for dropping stale ones
+
     this.error = null;        // what the last correction asked us to absorb
     this.errorLeft = 0;
     this._st = {};
@@ -37,11 +93,40 @@ export class GuestView {
 
   /** @param {object} msg a MSG.SNAP  @param {number} now seconds, local clock */
   receive(msg, now) {
+    // **A packet older than the one already applied is thrown away.** Jitter
+    // reorders them - more so the worse the link - and taking one at face
+    // value winds the playback clock *backwards*, so the span between the two
+    // snapshots goes negative and every car being interpolated lurches.
+    //
+    // On `n`, never on `c`: the race clock is reset to zero when the lights go
+    // green, so using it here freezes the guest on the grid for the first five
+    // seconds of every race.
+    if (this.seq !== null && msg.n <= this.seq) return;
+    this.seq = msg.n ?? null;
     this.prev = this.next;
     this.prevAt = this.nextAt;
     this.next = readSnapshot(msg, this.next === null ? [] : this.next.map((c) => ({ ...c })));
     this.nextAt = now;
-    if (!this.prev) this.prev = this.next.map((c) => ({ ...c }));
+    // Accumulate the host's elapsed time. A backwards step is the countdown
+    // handing over to the race, which is a reset and not a rewind: charge it
+    // one nominal interval so the timeline keeps moving forwards.
+    const step = (this.lastC === null || msg.c < this.lastC)
+      ? 1 / SNAPSHOT_HZ : msg.c - this.lastC;
+    this.lastC = msg.c;
+    this.prevClock = this.nextClock;
+    this.nextClock += step;
+    if (!this.prev) {
+      this.prev = this.next.map((c) => ({ ...c }));
+      // First packet: start playback where it should sit rather than catching
+      // up to it over the opening seconds.
+      this.prevClock = this.nextClock - INTERP_DELAY;
+      this.clock = this.prevClock;
+    }
+    // Where playback ought to be *at this instant*: on the older of the two
+    // snapshots it is about to interpolate between. This is the only moment
+    // that is true, which is why the error is taken here and nowhere else.
+    const err = (this.nextClock - INTERP_DELAY) - this.clock;
+    if (Math.abs(err) > CLOCK_RESET) { this.clock += err; this.trim = 0; } else this.trim = err;
 
     this.race.clock = msg.c;
     this.race.state = msg.st;
@@ -85,6 +170,9 @@ export class GuestView {
       // would have it turned twice.
       car.psi = truth.psi;
       car.onPit = truth.onPit;
+      // The phase of the stop, which is what starts the crew. Without it a
+      // guest's own car was never `service` and Guido simply never came out.
+      car.pit = truth.pit;
       car.sync();
       this.error = null;
       return;
@@ -101,6 +189,7 @@ export class GuestView {
       return;
     }
     car.tyre = truth.tyre;
+    car.pit = truth.pit;
     this.error = {
       s: this.race.track.delta(car.s, truth.s),
       n: truth.n - car.n,
@@ -159,8 +248,23 @@ export class GuestView {
     // Everyone else is drawn between the two snapshots we have. Extrapolating
     // past the newest one is deliberately capped: a dropped packet should show
     // as a car that hesitates, never as one that drives through a wall.
-    const span = Math.max(1e-3, this.nextAt - this.prevAt);
-    const t = THREE.MathUtils.clamp((now - this.prevAt) / span, 0, 1.4);
+    //
+    // Playback advances in real time on the *host's* clock and is held one
+    // snapshot behind it, so the normal case is genuine interpolation between
+    // two known states. Anchoring on arrival times instead meant `t` was 1 the
+    // moment a packet landed and every frame after it extrapolated, clamped,
+    // froze and then jumped - which is exactly what a rival looked like.
+    this.clock += dt * (1 + THREE.MathUtils.clamp(this.trim * CLOCK_TRIM,
+      -MAX_TRIM, MAX_TRIM));
+    const span = Math.max(1e-3, this.nextClock - this.prevClock);
+    // Running on past the newest snapshot is capped in *time*, not as a
+    // fraction of the span. As a fraction it grew with the gap - so the more
+    // packets a link lost, the further a car was thrown past the last thing
+    // known about it, and the bigger the snap back when the next one arrived.
+    // One send interval of run-on costs the same few metres however bad the
+    // link gets, which is the behaviour worth having.
+    const t = THREE.MathUtils.clamp((this.clock - this.prevClock) / span,
+      0, 1 + (1 / SNAPSHOT_HZ) / span);
     for (let i = 0; i < race.field.length; i++) {
       const rival = race.field[i];
       if (rival === car) continue;
@@ -180,6 +284,7 @@ export class GuestView {
           const pst = road.sample(rival.s, this._st);
           rival.n = THREE.MathUtils.clamp(b.n, road.limit(pst, -1), road.limit(pst, 1));
           rival.psi = b.psi;
+          rival.pit = b.pit;
           rival.out = b.out;
           rival.speed = b.speed;
           rival.progress = b.progress;
@@ -218,6 +323,7 @@ export class GuestView {
       rival.lap = b.lap;
       rival.place = b.place;
       rival.finished = b.finished;
+      rival.pit = b.pit;
       rival.out = b.out;
       rival.slip = b.slip;
       rival.gear = b.gear;

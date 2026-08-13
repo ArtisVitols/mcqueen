@@ -134,6 +134,12 @@ export class RemoteInput {
  * second and the shape never varies, so naming each field again in every
  * packet is pure overhead.
  */
+// A snapshot's sequence number. **`race.clock` cannot be used for this**: it
+// counts the countdown down and is then *reset to zero* when the lights go
+// green, so anything treating it as monotonic decides every packet in the
+// first five seconds of the race is stale and freezes the guest on the grid.
+let snapSeq = 0;
+
 export function snapshot(race) {
   const cars = [];
   for (const car of race.field) {
@@ -153,12 +159,22 @@ export function snapshot(race) {
       // drift up the order all race, which is a place the two ends disagree
       // about.
       car.out ? 1 : 0,
+      // *Which phase* of a stop, not merely "in the pits". Guido is started by
+      // `player.pit === 'service'`, and with only `onPit` on the wire a guest's
+      // own car never reached that state - so the crew came out on the host's
+      // screen and never on theirs. It is one small integer and it is the only
+      // way the other end can know a stop is being served rather than driven
+      // through.
+      PIT_WIRE.indexOf(car.pit),
     );
   }
-  return { t: MSG.SNAP, c: race.clock, st: race.state, l: race.lights, cars };
+  return { t: MSG.SNAP, n: ++snapSeq, c: race.clock, st: race.state, l: race.lights, cars };
 }
 
-export const SNAP_STRIDE = 13;
+/** The pit phases, in the order they go on the wire. Append only. */
+export const PIT_WIRE = ['out', 'in', 'stopped', 'service', 'leaving'];
+
+export const SNAP_STRIDE = 14;
 
 /**
  * Read a snapshot into a set of interpolation targets.
@@ -185,6 +201,7 @@ export function readSnapshot(msg, into = []) {
     c.tyre = msg.cars[b + 10];
     c.onPit = !!msg.cars[b + 11];
     c.out = !!msg.cars[b + 12];
+    c.pit = PIT_WIRE[msg.cars[b + 13]] ?? 'out';
   }
   into.length = Math.ceil(msg.cars.length / SNAP_STRIDE);
   return into;

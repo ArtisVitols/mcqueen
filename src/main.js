@@ -515,7 +515,13 @@ class Game {
           laps: this.settings.laps,
           difficulty: this.settings.difficulty,
           physics: this.settings.physics,
-          help: this.settings.help || 'easy',
+          // **None by default when people race each other.** `help` is the
+          // driver aid on a *human's* car, and on Easy it steers, brakes and
+          // overtakes for you - which is right for a five-year-old racing the
+          // AI and reads as "my car is driving itself" when two people are
+          // racing. The host can still turn it up for a race against a child;
+          // it is just no longer what you get without asking.
+          help: 'hard',
           ai: this.racerSpecs.length - 1,
         },
         onChange: () => this.pushLobby(),
@@ -1035,9 +1041,15 @@ class Game {
     dom('hud').classList.remove('hidden');
     dom('controls').classList.remove('hidden');
     // Laps or difficulty may have changed; apply what can be applied live.
-    this.race.totalLaps = this.settings.laps;
-    for (const car of this.race.field) car.totalLaps = this.settings.laps;
-    this.hud.setLaps(this.settings.laps);
+    //
+    // Not in a networked race, where every one of these belongs to the host:
+    // a guest that paused and resumed would quietly re-cut the race to its own
+    // local lap count while the other phone raced the agreed one.
+    if (!this.net) {
+      this.race.totalLaps = this.settings.laps;
+      for (const car of this.race.field) car.totalLaps = this.settings.laps;
+    }
+    this.hud.setLaps(this.race.totalLaps);
     this.audio.setEnabled(this.settings.sound);
     this.audio.setVolume(this.settings.volume);
     this._last = performance.now();
@@ -1063,6 +1075,19 @@ class Game {
     this.stopPump();
     const net = this.net;
     if (!net) return;
+    // **Start everyone's silence clock now.**
+    //
+    // `lastHeard` was last set when that guest clicked READY, and a guest says
+    // nothing at all between there and its own first input packet - which it
+    // cannot send until it has built the race and, on a circuit it did not
+    // already have, downloaded and parsed it. On a phone that is easily longer
+    // than `DROP_AFTER`, so the host evicted both players the instant the pump
+    // started and handed their cars to the AI before the lights went out. The
+    // timeout is meant to notice a phone that has *gone*, and it should start
+    // counting from when we start listening.
+    const begun = performance.now() / 1000;
+    if (net.peers) for (const peer of net.peers.values()) peer.lastHeard = begun;
+    net.lastHeard = begun;
     const hz = net.role === 'host' ? SNAPSHOT_HZ : INPUT_HZ;
     net.pump = setInterval(() => {
       if (this.net !== net || !this.race) return;
@@ -1231,7 +1256,7 @@ class Game {
 
       // One level of help for the whole grid, the host's - it travels in the
       // start message like everything else about the race.
-      for (const car of race.humans) race.setAssist(car, start.help || 'easy');
+      for (const car of race.humans) race.setAssist(car, start.help || 'hard');
 
       if (this.net.role === 'host') {
         // Every remote player's buttons arrive on their own link and are
@@ -1259,7 +1284,11 @@ class Game {
     this.buildPits(race);
     this.hud.setField(race.field.length);
     this.hud.setLights(0, false);
-    this.hud.update(race.player, this.settings.laps);
+    // `race.totalLaps`, never `settings.laps`. In a race off the wire the lap
+    // count is the host's, and `hud.update` *clamps* the number it shows to
+    // the total it is handed - so a guest whose own OPTIONS said 5 while the
+    // host chose 10 watched its lap counter stop at 5 and stay there.
+    this.hud.update(race.player, race.totalLaps);
 
     race.onLight = (lit, go) => {
       this.hud.setLights(lit, go);
@@ -1487,7 +1516,7 @@ class Game {
 
     const player = race.player;
     this.placeCamera(player, 1 - Math.pow(0.0016, dt));
-    this.hud.update(player, this.settings.laps);
+    this.hud.update(player, this.race.totalLaps);
     this.updatePits(race, player, dt);
 
     // Keep the shadow frustum on the player rather than the whole speedway.
