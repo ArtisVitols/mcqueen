@@ -162,6 +162,23 @@ try {
 }
 ok('all three tabs built a race');
 
+// **And the lobby is off the screen on every one of them.**
+//
+// The host hid it in `hostStartRace`, on its way past; a guest reaches the
+// race through `beginJoined` and nothing closed it at all, so it drove the
+// whole race with the lobby panel over the top. The state was already being
+// collected here - `lobbyHidden`, in the timeout diagnostic below - and never
+// asserted, which is the whole reason it shipped.
+const panels = await Promise.all(tabs.map((p) => p.evaluate(() => ({
+  lobby: document.getElementById('lobby').classList.contains('hidden'),
+  two: document.getElementById('two').classList.contains('hidden'),
+  menu: document.getElementById('menu').classList.contains('hidden'),
+  controls: !document.getElementById('controls').classList.contains('hidden'),
+}))));
+panels.every((p) => p.lobby && p.two && p.menu && p.controls)
+  ? ok('every tab is showing the race, not a menu over it')
+  : fail(`a panel is still up: ${JSON.stringify(panels)}`);
+
 const grids = await Promise.all(tabs.map((p) => p.evaluate(() => ({
   role: window.game.net?.role,
   humans: window.game.race.humans.map((c) => c.spec.id),

@@ -1085,6 +1085,18 @@ tested headlessly - see `tools/check_netplay.mjs` and `tools/check_lobby.mjs`.
   each player's own, which is the setting that matters when a parent and a
   five-year-old share a grid. Nothing in `startRace` may read local settings
   when a `start` message is present.
+- **A panel that must be gone for every race is closed in `startRace`, not by
+  whoever started it.** `hostStartRace` hid the lobby on its way past, so the
+  host was always fine; a guest reaches the race through `beginJoined` and
+  nothing closed it at all, so it raced with the lobby sitting over the screen.
+  That is the same shape as the pit speed cap: state that has to be true of
+  every race belongs in the one function every route goes through. The host's
+  own early hide stays, because it answers the tap before the circuit has
+  finished loading - and the guest deliberately keeps the panel up until then
+  to show "Loading the circuit…".
+- **`check_twoplayer` was already collecting `lobbyHidden` and never asserting
+  it** - only printing it in the timeout diagnostic. That is exactly why this
+  shipped. It is checked on every tab now.
 - **`.hint` carries connection status as well as the options blurb.** The
   short-screen rule that hides it is scoped to `#options` for that reason -
   unscoped, the host sees a dead panel instead of "waiting for the other

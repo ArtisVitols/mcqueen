@@ -1184,6 +1184,15 @@ class Game {
     this.paused = false;
     dom('two').classList.add('hidden');
     dom('menu').classList.add('hidden');
+    // The lobby closes *here*, not in whoever decided to start.
+    //
+    // `hostStartRace` hid it on the way past, so the host never saw a problem;
+    // a guest arrives through `beginJoined` and nothing had ever closed it, so
+    // it raced the whole way with the lobby sitting over the screen. Anything
+    // that has to be true of every race belongs in the one function every
+    // route goes through. The host's own early hide stays, because it answers
+    // the tap before the circuit has finished loading.
+    dom('lobby').classList.add('hidden');
     dom('options').classList.add('hidden');
     dom('pause-actions').classList.add('hidden');
     dom('btn-back').classList.remove('hidden');
