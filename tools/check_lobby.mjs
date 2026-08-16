@@ -62,7 +62,7 @@ const guests = [];
 const host = new Lobby({
   room: 3,
   cars: CAR_IDS,
-  settings: { track: 'msots', laps: 5, difficulty: 'normal', physics: 'arcade',
+  settings: { track: 'msots', laps: 5, difficulty: 'hard', physics: 'sport',
               help: 'easy', ai: 14 },
   onChange: (l) => {
     const msg = l.message();
@@ -238,7 +238,7 @@ for (const spec of TRACKS) {
       spec: CARS.find((c) => c.id === id), object: new THREE.Object3D(),
     }));
     const race = new Race(short, entries,
-      { difficulty: 'normal', laps: 2, physics: 'arcade', car: ids[0] },
+      { difficulty: 'hard', laps: 2, physics: 'sport', car: ids[0] },
       spec.gridLanes).build(ids[0], [ids[0]]);
     let t = 0;
     let offRoad = 0;

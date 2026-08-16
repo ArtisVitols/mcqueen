@@ -6,7 +6,7 @@ import { Hud } from './hud.js';
 import { Audio } from './audio.js';
 import { loadCar, loadTrack, disposeTrack, assetUrl } from './models.js';
 import * as Settings from './settings.js';
-import { QUALITY, DIFFICULTY, LAP_CHOICES } from './settings.js';
+import { QUALITY, DIFFICULTY, LAP_CHOICES, PHYSICS_CHOICES } from './settings.js';
 import { PHYSICS, driverAid } from './physics.js';
 import { MSG, RemoteInput, packButtons, snapshot, SNAPSHOT_HZ, INPUT_HZ } from './net.js';
 import { GuestView } from './net/guest.js';
@@ -410,10 +410,10 @@ class Game {
     group(dom('opt-laps'), LAP_CHOICES, () => this.settings.laps,
       (v) => `${v}`, (v) => { this.settings.laps = v; });
 
-    group(dom('opt-difficulty'), Object.keys(DIFFICULTY), () => this.settings.difficulty,
-      (v) => DIFFICULTY[v].label, (v) => { this.settings.difficulty = v; });
+    // No difficulty picker. There is one difficulty - Hard - and `Settings.load`
+    // pins it, including on a phone that has `easy` in its storage from before.
 
-    group(dom('opt-physics'), Object.keys(PHYSICS), () => this.settings.physics,
+    group(dom('opt-physics'), PHYSICS_CHOICES, () => this.settings.physics,
       (v) => PHYSICS[v].label, (v) => {
         this.settings.physics = v;
         this.showPhysicsBlurb();
@@ -513,7 +513,7 @@ class Game {
         settings: {
           track: this.settings.track,
           laps: this.settings.laps,
-          difficulty: this.settings.difficulty,
+          difficulty: 'hard',
           physics: this.settings.physics,
           // **None by default when people race each other.** `help` is the
           // driver aid on a *human's* car, and on Easy it steers, brakes and
@@ -700,12 +700,12 @@ class Game {
     const lobby = () => this.net?.lobby;
     this.pillGroup(dom('lobby-laps'), LAP_CHOICES, (v) => `${v}`,
       () => lobby()?.settings.laps, (v) => lobby()?.set('laps', v));
-    this.pillGroup(dom('lobby-difficulty'), Object.keys(DIFFICULTY),
-      (v) => DIFFICULTY[v].label,
-      () => lobby()?.settings.difficulty, (v) => lobby()?.set('difficulty', v));
-    this.pillGroup(dom('lobby-physics'), Object.keys(PHYSICS), (v) => PHYSICS[v].label,
+    // No difficulty row: there is one difficulty and the host does not choose
+    // it either. `help` below is the control that matters when a parent and a
+    // child share a grid, and it is a different thing entirely - it is how much
+    // the *car* drives itself, not how hard the AI races.
+    this.pillGroup(dom('lobby-physics'), PHYSICS_CHOICES, (v) => PHYSICS[v].label,
       () => lobby()?.settings.physics, (v) => lobby()?.set('physics', v));
-    // How much the car drives itself. One level for the whole grid: the host's.
     const help = { easy: 'Lots', normal: 'Some', hard: 'None' };
     this.pillGroup(dom('lobby-help'), Object.keys(DIFFICULTY), (v) => help[v],
       () => lobby()?.settings.help, (v) => lobby()?.set('help', v));

@@ -71,7 +71,27 @@ const CRASH_CLOSE = 3.4;     // m/s it is allowed to cross the road at
 const CRASH_STOPPED = 1.2;   // m/s that counts as parked
 // How fast contact may push two cars apart, in metres per second. Firm enough
 // to keep a pack from overlapping and slow enough to look like a push.
-const SEPARATE_RATE = 6;
+const SEPARATE_RATE = 2.4;
+/**
+ * How much of a touch the driver actually feels, as a fraction.
+ *
+ * **Contact used to end races.** Running alongside somebody bled 35-40% of a
+ * car's speed *per second* and shoved it sideways at 6 m/s, which on an oval -
+ * where the whole point is to run side by side - made close racing something
+ * to avoid rather than the game. It read as the car braking and steering by
+ * itself whenever anyone came near.
+ *
+ * At a fifth of that a brush is a nudge and a rub costs a few km/h, so two
+ * cars can hold a line beside each other for a corner. What it must still do
+ * is stop them occupying the same place: the *shove* is what does that, and it
+ * is why `SEPARATE_RATE` came down by rather less than the penalty did.
+ * Measured, worst overlap in a full race: 1.58 m at the old rate of 6, 1.61 m
+ * at 2.4, and 2.28 m at 1.2 - which is two cars two centimetres apart, i.e.
+ * inside each other. Anything from about 2.4 up behaves the same; below it
+ * falls off a cliff. `check_pits` measures the same thing with eighteen cars
+ * in one lane.
+ */
+const CONTACT_BITE = 0.2;
 // A conceding rival never drops below this, however slowly the human is going.
 // A race where the whole field waits for a stopped car is not a race.
 const CONCEDE_FLOOR = 30;    // m/s, about 108 km/h
@@ -773,7 +793,11 @@ export class Race {
         // others at once, and 0.6 per second each became 97% of its speed gone
         // in a second. That is what a pit lane full of cars felt like - ten
         // km/h, sideways, and nothing the driver could do about it.
-        const keep = left > 0 ? 1 - Math.min(0.35, left * 0.2) : 0.6;
+        // Scaled by CONTACT_BITE: the shape is unchanged - deeper overlap
+        // costs more, and running clean costs nothing - it just no longer
+        // takes half a car's speed away for touching somebody.
+        const bite = left > 0 ? Math.min(0.35, left * 0.2) : 0.4;
+        const keep = 1 - bite * CONTACT_BITE;
         slow.set(behind, Math.min(slow.get(behind) ?? 1, keep));
       }
     }

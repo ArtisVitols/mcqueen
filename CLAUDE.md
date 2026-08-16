@@ -283,6 +283,32 @@ Mack, who are still `"racer": false` - the pit crew and the parked transporter.
   which is exactly how Chick Hicks shipped backwards. `diag_cars.mjs` takes a
   list of car ids now, because eighteen in one frame are too small to read.
 
+## One difficulty, two handling models
+
+**The difficulty picker is gone and so is Arcade.** The owner races Hard on
+Sport and asked for the choices to stop existing: `Settings.load` pins
+`difficulty` to `hard` and coerces any saved `arcade`, so a phone that played
+the old build is moved rather than left on a setting it can no longer see.
+`PHYSICS_CHOICES` is what the two pickers offer.
+
+- **Nothing was deleted from the tables.** `DIFFICULTY.easy` and `.normal` are
+  still live, because the multiplayer HELP control maps onto their
+  `assist`/`lift` - that is how a child gets a hand on the same grid. Their AI
+  fields (aggression, aiSpeed, the concede rule) are now dead, so **the section
+  below describes a mode nothing can select.** It is kept because it is the
+  record of why Hard's numbers are what they are.
+- **Arcade is still in `PHYSICS`** and is still the fallback in `Race`, still
+  raced by `simulate.mjs`. It is the only model with no grip limit, which makes
+  it a useful control when a handling change looks wrong.
+- **The consequence to remember: single-player now has no driver aid at all.**
+  `lift` is 0 on Hard, so the corner braking, lane holding and auto-overtake
+  that made "hold the throttle down and win" true are only reachable through a
+  multiplayer race's HELP setting. If that ever needs undoing, the shape is to
+  put HELP in OPTIONS as its own row - it is a different question from how hard
+  the AI races.
+- The specialised tests were moved to `sport`/`hard` with it: they were all
+  running `arcade`/`normal`, which is now a configuration nobody can pick.
+
 ## Normal is Hard, and then it lets you win
 
 Every AI number in `DIFFICULTY.normal` is Hard's - aggression, band, fight,
@@ -1326,6 +1352,18 @@ entry is correct; a car floating over the gap is not.
 - **`refine_track.mjs` is not idempotent.** It reads the file it writes, so
   running it twice compounds the width trimming. Always run `extract_oval.py`
   first.
+- **A touch must not end somebody's race.** Contact bled 35-40% of a car's
+  speed *per second* and shoved it sideways at 6 m/s, which on an oval - where
+  the whole point is running side by side - made close racing something to
+  avoid. From the cockpit it read as the car braking and steering by itself
+  whenever anyone came near, and that is how it was reported. `CONTACT_BITE`
+  scales the penalty to a fifth of that: a brush is a nudge, a rub costs a few
+  km/h, and the shape is unchanged so a deeper overlap still costs more.
+  - **The shove came down by less, and the numbers say why.** It is what stops
+    two cars occupying the same place. Worst overlap over a full race: 1.58 m
+    at the old rate of 6, 1.61 m at 2.4, and **2.28 m at 1.2** - which is two
+    cars two centimetres apart. Anything from about 2.4 up behaves the same;
+    below that it falls off a cliff.
 - **Contact between cars is charged per second, not per step - and that goes
   for the *shove* as well as the speed penalty.** `separate()` runs at 120 Hz;
   unscaled, its speed penalty took 14 m/s off a car in half a second of light

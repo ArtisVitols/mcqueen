@@ -5,11 +5,17 @@ const DEFAULTS = {
   track: 'msots',
   laps: 5,
   quality: 'high',
-  difficulty: 'easy',
-  physics: 'arcade',
-  // How much the car drives itself in a two-player race. Each player keeps
-  // their own; the AI's difficulty belongs to whoever is hosting.
-  help: 'easy',
+  // **The only difficulty there is.** The picker is gone: the owner races Hard
+  // and nothing else, so there is one setting and it is not on screen. The
+  // other two entries in DIFFICULTY below are still live - the multiplayer
+  // HELP control maps onto their `assist`/`lift`, which is how a child gets a
+  // hand on the same grid - so do not delete them.
+  difficulty: 'hard',
+  physics: 'sport',
+  // How much the car drives itself in a race against other people. The host
+  // sets one level for the grid; it defaults to none, and `easy` here is what
+  // makes a car drive itself for a five-year-old.
+  help: 'hard',
   sound: true,
   volume: 0.8,
 };
@@ -97,12 +103,26 @@ export const QUALITY = {
 
 export const LAP_CHOICES = [2, 5, 10, 15, 20];
 
+/**
+ * The handling models a player may actually pick.
+ *
+ * Arcade is still in `PHYSICS` and still works - `simulate.mjs` races it, and
+ * it is the only model with no grip limit at all - but it is no longer offered
+ * anywhere. Racing against people wants a car that can be driven badly.
+ */
+export const PHYSICS_CHOICES = ['sport', 'pro'];
+
 export function load() {
-  try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
-  } catch {
-    return { ...DEFAULTS };
-  }
+  const saved = (() => {
+    try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; }
+  })();
+  const settings = { ...DEFAULTS, ...saved };
+  // A phone that has played before has `easy` and `arcade` written into its
+  // storage, and neither has a button any more. Coerce rather than leave
+  // somebody on a setting they cannot see or change.
+  settings.difficulty = 'hard';
+  if (!PHYSICS_CHOICES.includes(settings.physics)) settings.physics = DEFAULTS.physics;
+  return settings;
 }
 
 export function save(settings) {

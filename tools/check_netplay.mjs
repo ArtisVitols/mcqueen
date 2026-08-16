@@ -310,7 +310,7 @@ let failed = 0;
 let sawAnyService = false;
 for (const c of CASES) {
   for (const track of ['msots', 'palm']) {
-    const r = run({ track, physics: 'arcade', difficulty: 'normal', ...c });
+    const r = run({ track, physics: 'sport', difficulty: 'hard', ...c });
     // Agreement, allowing a photo finish to fall either way.
     //
     // The guest *predicts* its own car, so where it thinks it crossed the line

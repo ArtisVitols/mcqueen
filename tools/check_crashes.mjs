@@ -52,7 +52,7 @@ for (const spec of todo) {
   const track = new Track(read(`assets/${spec.data}`));
   const entries = CARS.map((c) => ({ spec: c, object: new THREE.Object3D() }));
   const race = new Race(track, entries,
-    { difficulty: 'normal', laps: LAPS, physics: 'arcade', car: 'lightning_mcqueen' },
+    { difficulty: 'hard', laps: LAPS, physics: 'sport', car: 'lightning_mcqueen' },
     spec.gridLanes).build('lightning_mcqueen');
   race.crashRate = RATE;
   const player = race.player;

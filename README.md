@@ -13,12 +13,11 @@ tap MULTIPLAYER instead - see below.
 
 - Left thumb: ◀ ▶ steer. Right thumb: ▲ gas, ▼ brake.
 - Five red lights, then green, then five laps. Lap counter is top right.
-- OPTIONS sets your car, the circuit, handling, laps (2/5/10/15/20),
-  difficulty, graphics quality and sound.
-- Difficulty is **Easy** by default: holding the throttle down is enough to
-  win, whichever handling model is picked. See below for what the other two do.
-  Once a rival gets past you it keeps that extra pace for about fifteen seconds
-  and then settles back down, so you get another go.
+- OPTIONS sets your car, the circuit, handling, laps (2/5/10/15/20), graphics
+  quality and sound.
+- There is **one difficulty and it is Hard** - no picker, nothing to set. The
+  rivals race you properly, and once one gets past you it keeps that extra pace
+  for about fifteen seconds before settling back down, so you get another go.
 - **Tuck in behind another car and you pick up a tow** - a few km/h more than
   you could manage on your own, worth most right behind them and gone once you
   pull out. It is how you get a run on somebody down the straight.
@@ -42,9 +41,9 @@ had it and you should come in at the next entrance. One stop per lap. **Guido** 
 and goes round all four wheels, then heads back to the wall and you rejoin on
 fresh tyres. **Mack** is parked alongside, watching.
 
-On Easy the car takes itself in, so holding the throttle down is still all you
-have to do. The other cars pit too, so a stop costs you nothing you do not get
-back.
+The other cars pit too, so a stop costs you nothing you do not get back. Slow
+down *before* you turn in: nothing brakes for you, and diving at the entrance
+flat out makes the car twitch as it joins the lane.
 
 A five-lap race needs no stop. Ten laps needs one, twenty needs three - which
 is what the longer race lengths are for. Staying out on dead tyres is not a
@@ -66,19 +65,12 @@ side of the road - against the wall or down on the apron - and takes no
 further part. It never happens right next to you, and there are never more
 than two in a race. They still appear on the results sheet, marked **OUT**.
 
-## Difficulty
+## Contact
 
-**Easy** drives most of the car for you: it lifts for the corners, holds a
-lane, overtakes and takes itself into the pits. Holding the throttle down wins.
-
-**Normal** races you exactly as hard as Hard does - the same pace, the same
-aggression, the same grudge - with one promise: **on the last lap nobody is
-quicker than you, and they move over.** Whatever has happened up to then, the
-race comes back to you at the end. (There is a limit: a rival more than about
-150 m up the road when the last lap starts is too far away to be caught by
-lifting.)
-
-**Hard** makes you no promises at all.
+Rubbing is racing. Touching another car pushes you both apart and costs the car
+behind a little speed - enough to notice, not enough to end your race. Sitting
+inside somebody for a full second costs about 8% of your speed; a brush costs
+almost nothing.
 
 ## The field
 
@@ -90,7 +82,7 @@ same twice.
 
 **Whichever car you pick is the fastest thing out there** - a rival's cruising
 pace is always below yours. What they can do is come back at you: get past one
-on Hard and it will hunt you down for about fifteen seconds before settling.
+it and it will hunt you down for about fifteen seconds before settling.
 
 ## The museum
 
@@ -109,8 +101,8 @@ all in the same lobby, on the same screen: who is in, what each of you is
 driving, and who has pressed READY.
 
 Everybody picks their own car and nobody can take one that is already taken.
-The **host** chooses the circuit, the laps, the difficulty, the handling, how
-much help the cars give and how many AI cars fill the grid - changing any of it
+The **host** chooses the circuit, the laps, the handling, how much help the
+cars give and how many AI cars fill the grid - changing any of it
 asks everybody to press READY again. When all of them are green the host's
 **RACE** button lights up.
 
@@ -123,13 +115,12 @@ for everybody else.
 
 ## Handling
 
-Three models, switchable in OPTIONS and mid-race from the pause menu. Everyone
-on track drives whichever you choose.
+Two models, switchable in OPTIONS and mid-race from the pause menu. Everyone on
+track drives whichever you choose.
 
 | | |
 |---|---|
-| **Arcade** | The default. Hold the gas and the car follows the track; cornering costs nothing and you cannot spin. Built for a five-year-old. |
-| **Sport** | Real grip. Carry too much speed in and the car washes wide with the tyres howling; the high line grips, the low line is shorter. Still cannot spin. |
+| **Sport** | The default. Real grip. Carry too much speed in and the car washes wide with the tyres howling; the high line grips, the low line is shorter. Still cannot spin. |
 | **Pro** | **No assists at all.** Nothing brakes for the corner, nothing holds your lane, nothing meters the throttle. Overdrive a bend and the car washes wide and scrubs speed off; get greedy on the power and the tail steps out. Predictable, and unforgiving of being clumsy. |
 
 Sport and Pro add a six-speed gearbox, so the engine steps through the ratios
@@ -160,9 +151,8 @@ centreline, and metres sideways from it. That one decision buys a lot:
 
 - Lap counting and race positions are integer arithmetic on `s`.
 - The tangent rotates as `s` advances, so a player who only holds the throttle
-  follows the oval by themselves. Steering just picks a lane. A five-year-old
-  can drive it, and under the default Arcade model spinning out or facing the
-  wrong way is impossible by construction.
+  follows the oval by themselves. Steering just picks a lane, and no model can
+  leave a car facing the wrong way - the heading is clamped.
 - The AI can dive to the inside or swing wide by moving one number.
 - The inside line is genuinely shorter, because the arc-length scale factor
   `1 + n·κ` is baked into the integration - so the low line pays, like it does
@@ -276,10 +266,12 @@ node  tools/shots_tracks.mjs       # ... on every circuit
 ```
 
 `tools/simulate.mjs` runs the actual `Track`/`Car`/`Driver`/`Race` code with no
-renderer - every handling model against every circuit at every difficulty, plus
+renderer - every handling model against every circuit at every AI tuning, plus
 a two-player grid - and asserts that every car completes the right number of
-laps, nobody leaves the racing surface, overtakes happen, and each difficulty
-lands where it should. Easy has to be a win on all of them.
+laps, nobody leaves the racing surface, and overtakes happen. It still races
+Arcade and the two easier AI tunings even though neither is offered in the
+menu any more: they are the controls that say whether a change is the handling
+or the racing.
 
 The network stack is tested the same way. `check_lobby.mjs` runs a host and
 three guests in one process over fake links; `check_netplay.mjs` races a host
