@@ -38,10 +38,10 @@ the tyres wear - faster if you lean on them through the corners.
 You can come in **whenever you like** - you do not have to wait for the tyres
 to go off. Each time you pass the pit entrance the bar shows **PIT ◀**: steer
 down to the inside and the car peels off into the pit lane, obeys the speed
-limit (110 km/h) and stops on the yellow box. **PIT!** on its own means the tyres have
-had it and you should come in at the next entrance. One stop per lap. **Guido** drives out
-and goes round all four wheels, then heads back to the wall and you rejoin on
-fresh tyres. **Mack** is parked alongside, watching.
+limit (110 km/h) and stops on the yellow box. **PIT!** on its own means the
+tyres have had it and you should come in at the next entrance. One stop per
+lap. **Guido** drives out and goes round all four wheels, then heads back to
+the wall and you rejoin on fresh tyres. **Mack** is parked alongside, watching.
 
 The other cars pit too, so a stop costs you nothing you do not get back. Slow
 down *before* you turn in: nothing brakes for you, and diving at the entrance
@@ -56,9 +56,11 @@ comes back to you.
 
 Clouds drift over the grandstands, there are people in them, cars that are
 being thrown about smoke their tyres, and a car that has crashed out sits at
-the roadside with its engine smoking. None of it is a downloaded file - the sky and the smoke are drawn by
-the game as it starts, the same way the engines are synthesised rather than
-sampled. On **Low** graphics there is less of it, on purpose.
+the roadside with its engine smoking. None of it is a downloaded file: the sky
+and the smoke are drawn by the game as it starts, the same way the engines are
+synthesised rather than sampled, and the little pictures of the cars in the
+picker are the models themselves. On **Low** graphics there is less of it, on
+purpose.
 
 ## Incidents
 
@@ -201,12 +203,13 @@ one circuit and inside the concrete on another.
 index.html  styles.css          the whole app shell
 src/track.js                    centreline spline, track space <-> world
 src/car.js                      a car in track space; owns the invariants
-src/physics.js                  the three handling models, and the driver aid
+src/physics.js                  three handling models (two offered), the aid
 src/wheels.js                   splits the wheels out of each car, spins them
 src/pits.js                     the pit road, as a second ribbon
 src/pitstop.js                  driving in, stopping, being serviced, leaving
 src/pitcrew.js                  Guido going round the wheels, and Mack parked
 src/museum.js                   the showroom
+src/thumbs.js                   the picker's car pictures, rendered at startup
 src/ai.js                       opponent drivers: lanes, drafting, grudges
 src/race.js                     grid, countdown, running order, incidents, finish
 src/sky.js                      the clouds, drawn into a canvas at startup
@@ -244,7 +247,7 @@ node  tools/extract_crowd.mjs palm         # ... and where its spectators sit
 python3 tools/inspect_track.py raw/x.glb   # materials, scale, overhead map
 node  tools/probe_points.mjs raw/x.glb 1,2 # what is actually at a world point
 
-node  tools/simulate.mjs all       # headless races: physics x track x difficulty
+node  tools/simulate.mjs all       # headless races: physics x track x AI tuning
 node  tools/trace_lap.mjs msots sport   # why a lap was slow, half-second by half-second
 node  tools/verify_track.mjs       # shipped tracks vs physics data - run this!
 node  tools/check_ride_height.mjs  # gap between each car and the road
@@ -262,6 +265,7 @@ node  tools/test_pause.mjs         # the pause menu, and panels that fit a phone
 node  tools/check_fullscreen.mjs   # landscape, the tap fallback, and Back
 node  tools/check_netplay.mjs      # a host and two guests agree, at four latencies
 node  tools/check_lobby.mjs        # four in a lobby, in one process
+node  tools/check_rooms.mjs        # can JOIN actually find a hosted room?
 node  tools/check_twoplayer.mjs    # three real tabs through the real menus
 node  tools/shots.mjs              # drive the real game in headless Chrome
 node  tools/shots_tracks.mjs       # ... on every circuit
@@ -275,9 +279,13 @@ Arcade and the two easier AI tunings even though neither is offered in the
 menu any more: they are the controls that say whether a change is the handling
 or the racing.
 
-The network stack is tested the same way. `check_lobby.mjs` runs a host and
-three guests in one process over fake links; `check_netplay.mjs` races a host
-and two guests at four latencies and packet-loss rates; `check_twoplayer.mjs`
+The network stack is tested the same way. `check_rooms.mjs` fakes PeerJS to
+prove a guest can actually *find* a hosted room - the one part that only ever
+ran on real phones, and shipped broken because of it. `check_lobby.mjs` runs a
+host and three guests in one process over fake links; `check_netplay.mjs` races
+a host and two guests at four latencies and packet-loss rates, measuring both
+how far a guest's own car drifts and how smoothly it draws everyone else's;
+`check_twoplayer.mjs`
 drives three real browser tabs through the real menus. All of them use the
 loopback or in-process transports, so a green run says nothing about the public
 broker - only real phones can test that.

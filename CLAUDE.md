@@ -14,10 +14,18 @@ Source 3D models live in a Google Drive folder the owner controls;
 `tools/fetch_assets.sh` pulls them into `raw/` (gitignored). Only the processed
 output in `assets/` is committed.
 
-**Audience matters.** Every design call is "would a five-year-old enjoy this?"
-Easy difficulty must be winnable by holding the throttle down and nothing else.
-Cars must never spin, stall, or face the wrong way. Prefer forgiving over
-realistic when they conflict.
+**Audience matters, and it has moved.** Every design call used to be "would a
+five-year-old enjoy this?", and the rule that fell out of it was that Easy had
+to be winnable by holding the throttle down and nothing else. The owner has
+since taken the difficulty picker away and pinned the game to Hard on Sport -
+they race it themselves - so that rule now only survives where a child can
+still reach it: the multiplayer HELP setting, which is the same `driverAid`
+under a different name. Read `## One difficulty, two handling models` before
+concluding that a section below describes something you can select.
+
+What has not moved: cars must never spin, stall, or face the wrong way, and
+forgiving beats realistic when the two conflict. That is why contact is a fifth
+of what it was and why the heading is clamped in every model.
 
 Where it has got to: eighteen cars race, up to four of them people, on three
 circuits, with pit stops, tyre wear, incidents and a lobby. Read `## The field`
@@ -71,8 +79,9 @@ This is the load-bearing decision. It buys:
 - Lap counting and race order are arithmetic on `s`.
 - The tangent rotates as `s` advances, so holding the throttle follows the oval
   by itself. Steering only picks a lane. That is what makes it playable for a
-  five-year-old, and under the default Arcade model it makes spinning out and
-  facing backwards *structurally* impossible rather than merely unlikely.
+  five-year-old, and under Arcade it makes spinning out and facing backwards
+  *structurally* impossible rather than merely unlikely. Sport, the default
+  now, cannot spin either; only Pro can.
 - AI lane changes, drafting and overtakes are one number moving.
 - The inside line is genuinely shorter: the arc-length scale `1 + n·κ` is
   integrated in `Car.step`, so the low line pays like it does in real NASCAR.
@@ -100,9 +109,15 @@ Consequences to respect:
 
 ## Handling models
 
-`src/physics.js` holds three, chosen in OPTIONS: **Arcade** (the original, and
-the default), **Sport** (real grip limits, still cannot spin) and **Pro** (yaw
-dynamics, no assists of any kind). Rivals drive whichever is selected.
+`src/physics.js` holds three: **Arcade** (the original), **Sport** (real grip
+limits, still cannot spin) and **Pro** (yaw dynamics, no assists of any kind).
+Rivals drive whichever is selected.
+
+**Only Sport and Pro are offered**, and Sport is the default - see
+`PHYSICS_CHOICES`. Arcade stays because it is still the fallback in `Race` and
+because `simulate.mjs` races it: it is the one model with no grip limit at all,
+which makes it the control when a handling change looks wrong. Nothing in the
+menus can reach it.
 
 **Pro was rewritten once, and the reason is worth keeping.** The first version
 was a slip-angle bicycle model - cornering stiffnesses, a friction ellipse,
@@ -144,18 +159,20 @@ rest. Two consequences to keep in mind before "fixing" them:
 - A player holding no buttons has nothing keeping it in a lane, so it wanders.
   That is the definition of no aid, not a defect; `check_steering` measures
   weaving only on cars that are being driven.
-- **Easy is not a guaranteed win under Pro**, unlike every other model. The
-  aid is what delivered that, and Pro is the one without one. It stays
+- **The full aid is not a guaranteed win under Pro**, unlike every other model.
+  The aid is what delivered that, and Pro is the one without one. It stays
   driveable - a car with no steering input still follows the road in track
   space - but you have to actually drive to win. `simulate.mjs` asserts the
-  win for the aided models and only "not hopeless" for Pro.
+  win for the aided models and only "not hopeless" for Pro. This matters for
+  the multiplayer HELP setting: a child given "Lots" on Pro is still not being
+  driven around.
 
 `Car.step` keeps everything the rest of the game depends on - integration in
 track space, the `psi` clamp, the rev limiter, track limits, lap counting - and
 delegates only the forces. That split is the point: a handling change can never
 become a lap-counting bug or put a car outside the corridor. Arcade's `drive()`
 is the old code moved verbatim, so its race pacing is unchanged and the
-"Easy is P1 everywhere" baseline still means something.
+"the full aid is P1 everywhere" baseline still means something.
 
 - **The grip numbers are tuned, not looked up.** These are short ovals: 63 m
   corner radius on Motor Speedway, 99 m on Palm Mile, 255 m on Yoyleland. An
@@ -163,8 +180,10 @@ is the old code moved verbatim, so its race pacing is unchanged and the
   limit at Yoyleland's 18° goes to *infinity* (`mu·tan θ` reaches 1), which is
   why `gripLimit` is capped. What the numbers buy is the right shape - the one
   real superspeedway stays flat out, the two short tracks need a lift.
-- **Easy has to be winnable by holding the throttle down, under every model.**
-  Grip alone does not deliver that. Under Sport the car arrives at a 63 m
+- **The aid has to make holding the throttle down enough, under every model.**
+  That was the rule when Easy was a difficulty; it is now what the multiplayer
+  HELP setting promises, and the code is the same. Grip alone does not deliver
+  it. Under Sport the car arrives at a 63 m
   corner doing 280 and scrubs along the wall; under Pro it is worse, because
   with tyre forces driving the heading a car with no steering input cannot
   generate the inward force a corner needs *at all* - holding the throttle is
@@ -185,7 +204,8 @@ is the old code moved verbatim, so its race pacing is unchanged and the
   fast they reach the same ceiling and not where they end up: the car runs into
   the identical wall either way. Under Arcade it was worse still, because that
   model has no drag term to reduce - `car.draft` was computed for the player
-  every step and read by nothing, and Arcade is the default. `draftSpeed` sits
+  every step and read by nothing, and Arcade was the default at the time.
+  `draftSpeed` sits
   beside `tyreSpeed` in `Car.step`, the one line every model shares, and is
   worth up to 9 km/h. Same shape as the worn-tyre penalty, and for the same
   reason. It **only reaches humans**, because `Race.updateDraft` is only called
@@ -1541,18 +1561,22 @@ Hicks shipped backwards.
 
 What "good" looks like right now:
 
-- `simulate.mjs all` — 30 OK: every handling model x circuit x difficulty,
-  plus a two-player grid on each circuit. Easy is P1 on all nine
-  model x circuit combinations. Hard beats a throttle-pinned player on six of
-  nine - every Arcade and Sport circuit; Pro is the exception on all three,
-  which is the known pace gap below rather than a new fault.
-  If Easy stops being a win, that is a regression regardless of what else
-  improved. Worst heading seen anywhere is 81° with every car still finishing;
-  the run asserts nothing exceeds 172°, which is where `maxPsi` would be
-  holding it.
+- `simulate.mjs all` — 30 OK: every handling model x circuit x AI tuning, plus
+  a two-player grid on each circuit. **It still races Arcade and the two easier
+  tunings although neither can be selected**, and that is deliberate: they are
+  the controls that say whether a change is in the handling or in the racing.
+  The full aid is P1 on all nine model x circuit combinations, and if that
+  stops being true it is a regression regardless of what else improved - it is
+  the same code the multiplayer HELP setting reaches. Worst heading seen
+  anywhere is 81° with every car still finishing; the run asserts nothing
+  exceeds 172°, which is where `maxPsi` would be holding it.
 - `check_wheels.mjs` — the expected count on all twenty models (four for the
   racers, three for Guido, ten for Mack), two steered wheels each, every one
-  turning 90° for a quarter turn the same way. It checks numerically *and*
+  turning 90° for a quarter turn the same way. Read the *radii* in its output
+  as well as the pass: it drives every wheel at one road speed, so a wheel
+  whose radius is wrong reports a quarter turn that is not 90° - which is how
+  Shu Todoroki's fronts were caught at 77.8°, having adopted a wheel arch that
+  made them 26% too big. It checks numerically *and*
   renders, because a tyre is nearly symmetric and a spinning one photographs
   as a still one. The count is per-model in `EXPECTED`, and asserting the
   exact number still matters — "found some wheels" would pass while quietly
@@ -1571,10 +1595,14 @@ What "good" looks like right now:
   than on Normal under two of the three models while every other number says
   Hard is plainly harder. What is asserted is what still tracks: Hard gives
   three to seven times the duels and takes back three to seven times the
-  places. Today, across the circuits: Arcade 84 duels and 16 places lost on
-  Normal against 119 and 36 on Hard. Those totals roughly doubled when the pit
-  speed cap stopped being left on a car for the rest of the race - a field that
-  can drive again after its stop is a field you have to pass again.
+  places. Today, across the circuits: Arcade 89 duels and 20 places lost on the
+  Normal tuning against 128 and 41 on Hard. Those totals roughly doubled when
+  the pit speed cap stopped being left on a car for the rest of the race - a
+  field that can drive again after its stop is a field you have to pass again -
+  and rose again with the slipstream, which also cut the time to convert a duel
+  from 11.6 s to 9.3 s. **It also asserts the tow itself**: a full slipstream
+  is worth 19.7 km/h of rev limiter under every model, and a rival is not given
+  it twice.
   **Read it per circuit as well as in total.** The totals looked perfectly
   healthy for a release in which Motor Speedway on Hard produced *one duel in
   five laps* - the player pulled clear, went out of `FIGHT_FORGET` range, and
@@ -1605,7 +1633,10 @@ What "good" looks like right now:
   rival that *cannot* reach the entrance stays out on dead tyres and beats
   everybody who did it properly. It also asserts the two things a stop must
   never disturb: that no handover moves a car more than a car's length or
-  turns it more than 20 degrees, and that every car's `progress` stays within
+  turns it more than 20 degrees - the *diving in* figure is measured apart from
+  the rest and is 0.56/1.73/1.76 m now the tests run Sport on Hard, because
+  nothing brakes for a driver who holds the throttle into the pit entrance;
+  braking first avoids it, and the geometry is unchanged - and that every car's `progress` stays within
   a metre of where it actually is on the road. And the invariant that catches
   the rest: **no car in the pit lane may move further in one step than it
   could have driven.** That is what found the contact shove, which no
@@ -1641,6 +1672,27 @@ What "good" looks like right now:
   predicts its own car, so two cars finishing 0.05 s apart are inside that same
   round trip by an order of magnitude and no correct netcode can resolve them.
   What must never differ is a place that was actually decided.
+  It also measures **how smoothly a rival moves on the guest**, as the
+  frame-to-frame change in its step: 0.1 cm in a room and 0.2 on wifi, 3.3 cm
+  at 1% loss and 16 cm at 5%. The mean is asserted on every link; the worst
+  single frame only on a link that loses nothing, because on one that does the
+  big numbers are a *stall* rather than stutter - only two snapshots are
+  buffered, so a gap longer than one send interval starves playback and no
+  interpolator can fill it. It was 45 cm on every link before the playback
+  clock was fixed.
+- `check_museum.mjs` — every car framed on the plinth, the controls, and then
+  a race *after* the visit, which is the real test that `close()` put back
+  everything it borrowed. That last one measures **acceleration** (28 -> 60
+  km/h), not a fixed speed by a fixed deadline: under a software renderer with
+  eighteen cars, twelve seconds of wall clock is a couple of seconds of race,
+  and a standing start covers much less of it under Sport with no aid than it
+  did under Arcade. A test that fails when the renderer has a bad day is not
+  measuring the thing it claims to.
+- `check_rooms.mjs` — the only test of `net/peer.js`: a host takes a slot, a
+  guest knocking on all eight finds it, seven empty slots answering first do
+  not kill the probe, and a stray `peer-unavailable` does not destroy the room.
+  It fakes PeerJS, so it says nothing about the real broker - only two phones
+  can.
 - `check_lobby.mjs` — a host and three guests over fake links: the room fills
   and turns away a fifth, two people cannot take the same car, RACE stays dark
   until every guest is green, a settings change un-readies them, and all four
@@ -1706,11 +1758,12 @@ build id matches, rather than assuming the deploy took.
   list that can grow its own `max-height` and `overflow-y`, and never let the
   panel itself do the scrolling.
 - Touch targets are sized for a small child; the `.ctl` floor is 68 px.
-- **Nothing is downloaded that can be drawn or synthesised.** Engines, tyres,
-  the crowd noise and the start lights are oscillators in `src/audio.js`; the
-  sky, the smoke sprite, the spectators, the contact shadows, the pit boxes and
-  the museum plinth are all canvases and generated geometry. Keep it that way —
-  it is zero bytes and zero licensing, and it is why a session is 5 MB rather
-  than 15.
+- **Nothing is downloaded that can be drawn, synthesised or rendered.**
+  Engines, tyres, the crowd noise and the start lights are oscillators in
+  `src/audio.js`; the sky, the smoke sprite, the spectators, the contact
+  shadows, the pit boxes and the museum plinth are all canvases and generated
+  geometry; and the car pictures in the picker are the *models themselves*,
+  drawn once at startup by `src/thumbs.js`. Keep it that way — it is zero bytes
+  and zero licensing, and it is why a session is 5 MB rather than 15.
 - Copyright is explicitly not a concern here: private family project, models
   are CC-BY Sketchfab uploads, attribution is in the README.
