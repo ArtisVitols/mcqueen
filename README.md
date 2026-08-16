@@ -12,6 +12,8 @@ tap MULTIPLAYER instead - see below.
 ## How it plays
 
 - Left thumb: ◀ ▶ steer. Right thumb: ▲ gas, ▼ brake.
+- The car picker shows a little picture of each car, rendered from the model
+  itself when the game starts - no pictures are downloaded.
 - Five red lights, then green, then five laps. Lap counter is top right.
 - OPTIONS sets your car, the circuit, handling, laps (2/5/10/15/20), graphics
   quality and sound.

@@ -159,14 +159,25 @@ await page.click('#btn-start');
 await page.waitForFunction("window.game.race && window.game.race.state === 'racing'",
   { timeout: 240000 });
 await page.evaluate(() => { window.game.input.state.gas = true; });
-await sleep(12000);
+// **Moving and still gaining**, rather than past a fixed speed by a fixed
+// wall-clock deadline. Under a software renderer with eighteen cars, twelve
+// seconds of wall clock is a couple of seconds of race - and since the default
+// became Sport with no driver aid, a standing start covers rather less ground
+// in it than Arcade did. Measuring acceleration asks the question this test is
+// actually about, which is whether the race still runs after a museum visit,
+// and does not re-fail every time the renderer has a bad day.
+await sleep(9000);
+const first = await page.evaluate(() => Math.round(window.game.race.player.speedKmh));
+await sleep(9000);
 const racing = await page.evaluate(() => {
   const p = window.game.race.player;
   return { kmh: Math.round(p.speedKmh), cars: window.game.race.field.length,
-           fov: window.game.camera.fov };
+           fov: window.game.camera.fov, from: 0 };
 });
-racing.kmh > 30 && racing.cars === FIELD
-  ? ok(`racing normally after a museum visit (${racing.kmh} km/h, ${racing.cars} cars)`)
+racing.from = first;
+racing.kmh > 10 && racing.kmh > first && racing.cars === FIELD
+  ? ok(`racing normally after a museum visit (${racing.from} -> ${racing.kmh} km/h, ` +
+       `${racing.cars} cars)`)
   : fail(JSON.stringify(racing));
 await page.screenshot({ path: join(OUT, 'museum_then_race.png') });
 

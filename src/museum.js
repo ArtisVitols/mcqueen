@@ -58,15 +58,32 @@ export class Museum {
       new THREE.MeshStandardMaterial({ color: 0x0d1017, roughness: 0.35, metalness: 0.5 }),
     );
     floor.rotation.x = -Math.PI / 2;
+    // **Below the plinth, not level with it.** Both are discs of 64 segments
+    // and the plinth's top face sits flush at y = 0, so a floor at y = 0 too
+    // is two coplanar surfaces fighting over the same depth - which shows as
+    // bright and dark wedges radiating from the centre, exactly following the
+    // triangulation, and crawls as the camera moves. It reads as the plinth
+    // having the wrong material; it is the plinth and the floor being in the
+    // same place. Dropping the floor to the plinth's base also makes it look
+    // like something standing on the floor rather than inlaid into it.
+    floor.position.y = -0.22;
     floor.receiveShadow = true;
     g.add(floor);
 
     // The plinth, with a bright rim so the car reads against the dark floor.
     const plinth = new THREE.Mesh(
       new THREE.CylinderGeometry(PLINTH_R, PLINTH_R + 0.18, 0.22, 64),
-      new THREE.MeshStandardMaterial({ color: 0x1b2130, roughness: 0.5, metalness: 0.35 }),
+      // **Matte, and not metal.** `metalness` was 0.35 with no environment map
+      // to reflect, so the top face had nothing to be metallic *with*: it went
+      // dark and lit only through moving specular highlights, which is what
+      // made it look like the wrong material.
+      new THREE.MeshStandardMaterial({ color: 0x232a3a, roughness: 0.78, metalness: 0.0 }),
     );
     plinth.position.y = -0.11;          // top face flush with y = 0
+    // It still takes the car's shadow. The radial banding here was the floor
+    // fighting it for the same depth, not shadow acne - see the note on the
+    // floor above - and the generous `normalBias` on the key light is what
+    // keeps the acne away.
     plinth.receiveShadow = true;
     g.add(plinth);
     this.plinth = plinth;

@@ -192,6 +192,19 @@ button.big.ghost {
   cursor: pointer;
 }
 .card.sel { border-color: #ffd66b; background: rgba(255, 214, 107, 0.16); }
+/* The car's own picture, rendered from its model at runtime (src/thumbs.js).
+   Sized in ems so it tracks the card's font, and given a fixed box so a card
+   whose picture has not arrived yet is exactly the same shape as one that
+   has - otherwise the whole list reflows as they appear. */
+.cshot {
+  flex: none;
+  width: 3.9em;
+  height: 2.5em;
+  object-fit: contain;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
 .chip {
   flex: none;
   min-width: 30px;

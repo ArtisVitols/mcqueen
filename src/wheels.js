@@ -250,7 +250,17 @@ function fromSplit(pivot) {
 
   const out = [];
   for (const cl of clusters) {
-    const centre = cl.box.getCenter(new THREE.Vector3());
+    // **The axle comes from the seed, not from what the cluster grew into.**
+    //
+    // This is the same rule `adopt` already states and the radius below already
+    // obeys; the centre was the one place still reading the grown box, and it
+    // is the one that decides where the wheel *turns about*. Adoption is not
+    // symmetric - a piece of arch above the tyre has nothing below it to
+    // balance it - so the union's centre drifts off the axle. Shu Todoroki's
+    // fronts ended up pivoting 10 cm above their own tyres: the wheel orbited
+    // rather than spun, which reads as turning strangely and drags the
+    // adopted bodywork through the car once a lap of the wheel.
+    const centre = cl.seed.getCenter(new THREE.Vector3());
     const node = new THREE.Group();
     node.position.copy(centre);
     for (const item of cl.items) {
@@ -438,7 +448,17 @@ function adopt(cluster, island) {
   const centred = off < r * 0.35;
   const small = is.y < w.y * 0.5 && is.z < w.z * 0.5;
   if (!centred && !small) return false;
-  return off + Math.max(is.y, is.z) / 2 < r * (centred ? 1.15 : 1.45);
+  // **And it has to touch the tyre.** A tread block is stuck *on* the
+  // circumference, so part of it is inside the disc; a wheel arch floats
+  // entirely outside, above the crown, and nothing about being small and near
+  // the rim tells the two apart. Shu Todoroki's front wheels adopted a piece
+  // of arch sitting 5 cm clear of the top of the tyre, which turned with them
+  // and dragged through the bodywork - and, because it made the cluster's box
+  // half a tyre taller, gave the fronts a rolling radius 26% too big so they
+  // visibly span too slowly for the road.
+  const reach = Math.max(is.y, is.z) / 2;
+  if (!centred && off - reach > r * 1.05) return false;
+  return off + reach < r * (centred ? 1.15 : 1.45);
 }
 const _c1 = new THREE.Vector3();
 const _c2 = new THREE.Vector3();

@@ -13,6 +13,7 @@ import { GuestView } from './net/guest.js';
 import { Lobby } from './net/lobby.js';
 import { Museum } from './museum.js';
 import { PitCrew } from './pitcrew.js';
+import { CarThumbs } from './thumbs.js';
 import { Smoke, smokeFor } from './smoke.js';
 import { skyTexture } from './sky.js';
 import { makeCrowd, swayCrowd } from './crowd.js';
@@ -324,7 +325,8 @@ class Game {
       const b = document.createElement('button');
       b.className = 'card';
       b.dataset.car = spec.id;
-      b.innerHTML = `<span class="chip" style="background:${spec.colour}">${spec.number}</span>
+      b.innerHTML = `<img class="cshot" alt="">
+                     <span class="chip" style="background:${spec.colour}">${spec.number}</span>
                      <span class="cname">${spec.name}</span>`;
       b.onclick = () => {
         this.settings.car = spec.id;
@@ -336,6 +338,30 @@ class Game {
       wrap.appendChild(b);
     }
     this.syncCarPicker();
+    this.paintCarThumbs();
+  }
+
+  /**
+   * Put a picture of each car on its card.
+   *
+   * Drawn from the models that are already loaded rather than shipped as
+   * images - see `thumbs.js`. A few per frame, because eighteen small renders
+   * in one go is a hitch you can feel, and a card without its picture yet is
+   * still a perfectly good button.
+   */
+  paintCarThumbs() {
+    if (!this.renderer || !this.models.size) return;
+    this.thumbs = this.thumbs || new CarThumbs(this.renderer, this.scene);
+    const wanted = this.racerSpecs
+      .map((spec) => ({ id: spec.id, model: this.models.get(spec.id) }))
+      .filter((m) => m.model);
+    this.thumbs.fill(wanted, (id, url) => {
+      for (const card of dom('car-picker').children) {
+        if (card.dataset.car !== id) continue;
+        const img = card.querySelector('.cshot');
+        if (img) img.src = url;
+      }
+    });
   }
 
   syncCarPicker() {

@@ -530,6 +530,20 @@ speed, steers the front pair and leans the body. Nothing re-exports a GLB -
   it. The wheels were rotating perfectly and the truck looked exactly as though
   they were not. Wheel-shaped islands *seed* a cluster; everything else is then
   offered to them and `adopt`ed on containment rather than shape.
+- **An adopted piece has to *touch* the tyre.** A tread block is stuck on the
+  circumference, so part of it is inside the disc; a wheel arch floats clear
+  above the crown. Nothing about being small and near the rim separates them,
+  and Shu Todoroki's fronts took a piece of arch sitting 5 cm above the tyre:
+  it turned with the wheel and swept through the bodywork, which is what
+  "flickering" was.
+- **The axle comes from the seed too, not from the grown box.** The radius
+  already did; the centre was the last thing still reading the union, and it is
+  the one that decides what the wheel *turns about*. Adoption is not symmetric -
+  an arch above the tyre has nothing below it to balance - so the centre drifts.
+  Shu's fronts pivoted 10 cm above their own tyres and orbited rather than
+  spun. The same pollution made the cluster half a tyre taller, giving a rolling
+  radius of 0.474 m against a real tyre of 0.375, so they turned 26% too slowly
+  for the road as well. Both symptoms, one cause.
 - **Adoption is tested against the seed, never the growing box.** Testing
   against what a cluster has become is a runaway: each piece taken makes the
   box bigger, which admits a bigger piece next time. Sarge's front wheel
@@ -625,6 +639,26 @@ away through a catch fence.
   at road level, which is what "measured onto the wrong thing" looks like in
   numbers, and then photographs the stands.
 
+## Pictures of the cars
+
+The picker draws each car from **the model that is already loaded**, in
+`src/thumbs.js` - no images ship, which is the same rule the sky, the smoke and
+the crowd follow. Every car is in memory before the menu appears, so a portrait
+costs one small draw and nothing on the wire.
+
+- **Each car is drawn where it stands.** Lifting one into a scratch scene is
+  the obvious approach and it is the skinning trap: McQueen binds to the world
+  matrix he had at load. So the scene is left alone, everything else in it is
+  hidden for a single frame, and a throwaway camera is pointed at the car.
+  What was visible goes back - and *what was hidden stays hidden*, or the idle
+  camera ends up looking at eighteen cars in a heap on the start line.
+- **Front three-quarter.** These characters have their eyes on the windscreen,
+  so a rear view is unidentifiable at 132x84: the face and the nose are what
+  say which car it is.
+- **A few per frame.** Eighteen renders in one go is a hitch you can feel, and
+  a card without its picture yet is still a perfectly good button. The card
+  reserves the space either way, or the list reflows as they arrive.
+
 ## The museum
 
 **MUSEUM** on the main menu: a car on a lit plinth, drag to turn, pinch to
@@ -655,6 +689,18 @@ zoom, arrows to step through the field. `src/museum.js`.
 - A wide flat plinth lit from a sharp angle is the classic recipe for shadow
   acne - it showed as radial banding following the cylinder's triangulation,
   and wants a much bigger `normalBias` than the outdoor sun does.
+- **... and when the banding came back, it was not the shadows.** The floor is
+  a 64-segment disc at y = 0 and the plinth's top face sits *flush* at y = 0,
+  so the two fought over the same depth - which draws as bright and dark
+  wedges radiating from the centre, following the triangulation exactly like
+  acne does, and crawls as the camera moves. It reads as the plinth having the
+  wrong material. The floor sits at the plinth's base now. Worth remembering
+  the shape of this one: two explanations predict the same picture, and the
+  cheap test is to move one surface rather than to tune the shadow.
+- **A metallic surface with nothing to reflect is not a material.** The plinth
+  was `metalness: 0.35` in a room with no environment map, so it had nothing to
+  be metallic *with*: it went dark and lit only through specular highlights
+  that swam about as the turntable turned. Matte, and it behaves.
 
 ## Pit stops
 
