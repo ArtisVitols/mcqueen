@@ -90,7 +90,7 @@ same twice.
 
 **Whichever car you pick is the fastest thing out there** - a rival's cruising
 pace is always below yours. What they can do is come back at you: get past one
-it and it will hunt you down for about fifteen seconds before settling.
+and it will hunt you down for about fifteen seconds before settling.
 
 ## The museum
 
