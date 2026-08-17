@@ -1418,6 +1418,49 @@ entry is correct; a car floating over the gap is not.
 - **`refine_track.mjs` is not idempotent.** It reads the file it writes, so
   running it twice compounds the width trimming. Always run `extract_oval.py`
   first.
+- **Cars are solid, and until recently they were not.** `separate` only ever
+  resolved contact *sideways*: drive into the back of somebody and the lateral
+  overlap is at its maximum, so the code squirted the pair apart across the
+  road and let the one behind carry straight on. Nothing anywhere stopped two
+  cars sharing a place along the road. What hid it for so long was the speed
+  penalty - at 40% of your speed per second you stopped dead behind anyone you
+  touched and never noticed the wall was missing - and softening that to a
+  fifth took the cover off, which is how the owner found it.
+  - **Resolve along the axis of least penetration, measured as a *fraction* of
+    each dimension.** A car is twice as long as it is wide, so raw depths are
+    not comparable: a car sitting squarely behind another has the full 2.3 m of
+    lateral overlap and resolves sideways however close it gets, sliding past
+    the corner of the car in front. That was the first attempt and it still let
+    cars through.
+  - **The shunt kills closing speed in the instant it happens.** The positional
+    push is capped at `SEPARATE_RATE`, 2 cm a step, while a car closing at
+    32 m/s covers 27 cm a step - the shove can never out-run the closing on its
+    own. Easing the speed down over 0.15 s is no better: at that rate 0.15 s is
+    four and a half metres, the whole car. Kill the closing at once and the
+    gentle shove has all the time it needs.
+  - **`CREEP_BY` is what keeps a race finishing.** A wreck is immovable and
+    doing nothing, so clamping to its speed exactly stops dead every car that
+    reaches it, and on a circuit where the AI holds its lane that is the entire
+    field queued behind one parked car for ever. `check_crashes` found it
+    immediately: not one car finished. A walking-pace floor lets a driver pick
+    its way past something stationary, and still nothing can be driven through
+    at speed.
+  - **The aid gave up on overtaking at exactly the wrong moment.** `blockedBy`
+    asks "am I catching that car", and the collision clamps you to its speed -
+    so the answer became "no" the instant you arrived behind somebody, and the
+    aid stopped trying to pass precisely when passing became the only way
+    through. A car you are already touching blocks you whatever the
+    speedometer says.
+  - **Two assertions were scoped rather than fixed, and that is a judgement
+    worth knowing.** With solid cars, Arcade's field runs as one train - it has
+    no grip limit, so everybody corners flat out and three laps finish inside
+    two seconds - and there is no way through a queue where everyone is going
+    the same speed. So the "the full aid wins" rule in `simulate.mjs` and the
+    "Easy takes no places back" rule in `check_racing.mjs` now apply to
+    **Sport**, which is the model this is actually played on and where both
+    still hold. Pro was already exempt: `driverAid` returns immediately under
+    it, so its "aided" player has no aid at all. The alternative was to make
+    cars passable again, which is the bug this started from.
 - **A touch must not end somebody's race.** Contact bled 35-40% of a car's
   speed *per second* and shoved it sideways at 6 m/s, which on an oval - where
   the whole point is running side by side - made close racing something to
@@ -1565,9 +1608,11 @@ What "good" looks like right now:
   a two-player grid on each circuit. **It still races Arcade and the two easier
   tunings although neither can be selected**, and that is deliberate: they are
   the controls that say whether a change is in the handling or in the racing.
-  The full aid is P1 on all nine model x circuit combinations, and if that
-  stops being true it is a regression regardless of what else improved - it is
-  the same code the multiplayer HELP setting reaches. Worst heading seen
+  The full aid is P1 on all three **Sport** circuits, and if that stops being
+  true it is a regression regardless of what else improved - it is the same
+  code the multiplayer HELP setting reaches. Arcade and Pro are exempt and the
+  reasons differ: Pro has no aid at all, and Arcade's field is one train that
+  solid cars cannot be passed through. Worst heading seen
   anywhere is 81° with every car still finishing; the run asserts nothing
   exceeds 172°, which is where `maxPsi` would be holding it.
 - `check_wheels.mjs` — the expected count on all twenty models (four for the

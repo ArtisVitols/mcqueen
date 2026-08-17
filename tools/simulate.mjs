@@ -228,17 +228,28 @@ if (!isMain) {
     console.log(`  ${k.padEnd(24)} P${p.place}  ${p.behind > 0 ? '+' : ''}` +
                 `${p.behind.toFixed(1)}s`);
   }
-  // A five-year-old can tap any entry in the menu, so Easy has to be winnable
-  // by holding the throttle down - under every model that has a driver aid.
+  // The full aid has to be enough to win by holding the throttle down. That is
+  // what the multiplayer HELP setting promises a child, and `Sport` is the
+  // model it will be raced on, so that is where it is required.
   //
-  // Pro deliberately has none: it is the one where the car does nothing you
+  // Pro deliberately has no aid: it is the one where the car does nothing you
   // did not ask it to, which is the whole point of it and what the owner
   // asked for. Holding the throttle there gets you round, because a car with
   // no steering input still follows the road in track space, but it will not
   // win - you have to actually drive. What is still required is that it
   // finishes and is not hopeless.
+  //
+  // **Arcade is judged the same way as Pro, and not because its aid stopped
+  // working.** It has no grip limit at all, so every car corners flat out and
+  // the whole field runs as one train - three laps finish inside two seconds.
+  // Once cars became solid there is no way through a queue where everybody is
+  // going the same speed: the aid pulls out, finds the next car alongside, and
+  // there is simply nowhere to go. That is honest behaviour rather than a
+  // fault, it is a model nobody can select, and the alternative was to make
+  // cars passable again - which is the bug this all started from. Sport, which
+  // *is* the default, is P1 on all three circuits.
   for (const physics of Object.keys(PHYSICS)) {
-    const aided = PHYSICS[physics].assisted || physics === 'arcade';
+    const aided = PHYSICS[physics].assisted && physics !== 'arcade';
     for (const spec of TRACKS) {
       const { place, behind } = placings[`${physics}/${spec.id}/easy`];
       if (aided && place > 2) {

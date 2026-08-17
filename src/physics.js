@@ -584,6 +584,9 @@ const AID_LOOK = [0, 22, 48, 78, 112];
 const AID_CROSS_RATE = 7.5;           // m/s across the track at full lock, by default
 const AID_EDGE = 1.0;                 // stop steering this far from the edge
 const AID_TRAFFIC = 40;               // metres ahead the aid looks for traffic
+// Close enough to be touching, and then some. Inside this the car in front is
+// blocking whether or not it is being caught.
+const AID_TOUCHING = 6.5;
 const AID_PASS = 3.2;                 // ... and how far beside it to aim
 const AID_PASS_CLOSE = 2.2;           // 1/s; brisker than simply holding a lane
 
@@ -679,7 +682,14 @@ function blockedBy(car, field) {
     const d = car.track.delta(car.s, other.s);
     if (d <= 2 || d >= gap) continue;
     if (Math.abs(other.n - car.n) > 2.6) continue;
-    if (other.speed > car.speed - 0.5) continue;      // not actually catching it
+    // "Am I catching it?" - but a car you are already nose to tail with is
+    // blocking you whatever the speedometer says. Contact clamps the car
+    // behind to the speed of the one in front, so the moment you arrive the
+    // closing rate is zero and this test says "not blocked" - which had the
+    // aid give up on the pass at exactly the point the pass became the only
+    // way past. Before cars were solid you simply went through, and the
+    // question never came up.
+    if (d > AID_TOUCHING && other.speed > car.speed - 0.5) continue;
     gap = d;
     best = other;
   }

@@ -71,10 +71,14 @@ than two in a race. They still appear on the results sheet, marked **OUT**.
 
 ## Contact
 
-Rubbing is racing. Touching another car pushes you both apart and costs the car
-behind a little speed - enough to notice, not enough to end your race. Sitting
-inside somebody for a full second costs about 8% of your speed; a brush costs
-almost nothing.
+Rubbing is racing. Running alongside somebody eases you apart and costs the car
+behind a little speed - enough to notice, not enough to end your race. A brush
+costs almost nothing.
+
+**You cannot drive through anybody.** Hit the back of a car and you are stopped
+by it: you drop to its speed and stay there until you go round. A car that has
+crashed and stopped can be picked past at walking pace, so nothing ever blocks
+the road for good.
 
 ## The field
 

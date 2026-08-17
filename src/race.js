@@ -92,6 +92,14 @@ const SEPARATE_RATE = 2.4;
  * in one lane.
  */
 const CONTACT_BITE = 0.2;
+// Two cars are inside each other within this much of road and this much across
+// it. A car is 4.4 m long and about 1.9 m wide; these are the sums of the two
+// half-extents, with a little slack so a touch registers before the paint does.
+const CAR_LONG = 4.6;
+const CAR_WIDE = 2.3;
+// The slowest a shunt may leave a car, in m/s. See the note where it is used:
+// without a floor, anything parked is an immovable wall.
+const CREEP_BY = 2.5;
 // A conceding rival never drops below this, however slowly the human is going.
 // A race where the whole field waits for a stopped car is not a race.
 const CONCEDE_FLOOR = 30;    // m/s, about 108 km/h
@@ -738,7 +746,8 @@ export class Race {
     // Cars that are where they are meant to be and are not going to be moved:
     // a wreck at the roadside, and a car stopped on its mark being serviced.
     const fixed = (c) => c.out || c.pit === Pit.STOPPED || c.pit === Pit.SERVICE;
-    const slow = new Map();       // car -> the harshest contact it earned
+    const slow = new Map();       // car -> the harshest rub it earned
+    const brake = new Map();      // car -> the fastest a shunt leaves it going
     for (let i = 0; i < f.length; i++) {
       for (let j = i + 1; j < f.length; j++) {
         const a = f[i], b = f[j];
@@ -753,19 +762,81 @@ export class Race {
         // enough that a car peeling into its own drives across its
         // neighbour's, and the one on the mark is the one that must not move.
         if (fixed(a) && fixed(b)) continue;
+        // One of them may be immovable, and then the other one does all the
+        // moving - the same total separation, out of one car instead of two.
+        const share = fixed(a) || fixed(b) ? 1 : 0.5;
         const ds = a.road.delta(a.s, b.s);
-        if (Math.abs(ds) > 5.2) continue;
+        if (Math.abs(ds) > CAR_LONG) continue;
         const dn = b.n - a.n;
-        const overlap = 2.3 - Math.abs(dn);
+        const overlap = CAR_WIDE - Math.abs(dn);
         if (overlap <= 0) continue;
+
+        // **Which way are they actually inside each other?**
+        //
+        // This used to resolve every contact sideways, whatever the geometry,
+        // and that is why a car could be driven *through* the back of another
+        // one: nose to tail the lateral overlap is at its maximum, so the code
+        // squirted them apart across the road and let the one behind carry
+        // straight on. Nothing anywhere stopped two cars sharing a place along
+        // the road. What hid it was the speed penalty - at 40% of your speed
+        // per second you stopped dead behind somebody and never noticed the
+        // wall was missing - and softening that to a fifth took the cover off.
+        //
+        // So resolve along whichever axis they overlap *least*, which is the
+        // standard way and gives the answer a person expects: alongside, you
+        // rub and are eased apart sideways; into the back of somebody, you are
+        // stopped by them.
+        // Compared as *fractions* of each dimension, because a car is twice as
+        // long as it is wide and the raw depths are not comparable. Take the
+        // raw ones and a car sitting squarely behind another - `dn` of nearly
+        // zero, so the lateral overlap is at its full 2.3 m - resolves
+        // sideways however close it gets, slides past the corner of the car in
+        // front and carries on. Which is precisely the bug being fixed.
+        const inLine = CAR_LONG - Math.abs(ds);
+        if (inLine / CAR_LONG < overlap / CAR_WIDE) {
+          const dir = ds >= 0 ? 1 : -1;         // +1: b is ahead of a
+          const want = Math.min(inLine * share, SEPARATE_RATE * dt);
+          if (!fixed(a)) this.shove(a, -dir * want);
+          if (!fixed(b)) this.shove(b, dir * want);
+          // ... and **at once**, not over a comfortable fraction of a second.
+          //
+          // This is the half that actually stops a car being driven through
+          // another one, and it took a measurement to see why. The positional
+          // push is rate-limited to `SEPARATE_RATE` - 2 cm a step - while a
+          // car closing at 32 m/s covers 27 cm a step, so the shove can never
+          // out-run the closing on its own. Easing the speed down over 0.15 s
+          // is no better: at that closing rate 0.15 s is four and a half
+          // metres, which is the whole car. A rear-end kills the closing speed
+          // in the instant it happens, and then the gentle shove has all the
+          // time it needs to ease them apart.
+          //
+          // Only the one behind is slowed. Nudging the front car as well sends
+          // it into whatever *it* is following, and a shunt that propagates up
+          // a queue is how a pack turns into a concertina.
+          //
+          // **Never below a crawl**, and that floor is what keeps a race
+          // finishing. A wreck is immovable and doing nothing, so clamping to
+          // its speed exactly stops dead every car that reaches it - and on a
+          // circuit where the AI holds its lane, that is the whole field
+          // queued behind one parked car for the rest of the afternoon.
+          // `check_crashes` found it at once: no car finished at all. At a
+          // walking pace instead, a driver picks its way past something
+          // stationary in a second or two, which is what it would do anyway,
+          // and nothing can be driven *through* at racing speed - which is the
+          // thing being fixed.
+          const back = dir > 0 ? a : b;
+          const front = dir > 0 ? b : a;
+          if (!fixed(back) && back.speed > front.speed) {
+            const v = Math.max(front.speed, CREEP_BY);
+            brake.set(back, Math.min(brake.get(back) ?? Infinity, v));
+          }
+          continue;
+        }
 
         // Move each of them away from the other, but only as far as the road
         // allows. Shoving them the full distance regardless is how the field
         // ended up outside the corridor wherever the track narrows.
         const dir = dn >= 0 ? 1 : -1;
-        // One of them may be immovable, and then the other one does all the
-        // moving - the same total separation, out of one car instead of two.
-        const share = fixed(a) || fixed(b) ? 1 : 0.5;
         // **Per second, not per step.** This is the same lesson the speed
         // penalty below already learned, and the lateral shove had never had
         // it: pushing cars apart by the whole overlap every step is a lateral
@@ -785,7 +856,7 @@ export class Race {
         // took 14 m/s off a car in half a second of light contact - a touch
         // read as a crash, and on a superspeedway where the field runs nose to
         // tail that is most of the race.
-        const left = 2.3 - Math.abs(b.n - a.n);
+        const left = CAR_WIDE - Math.abs(b.n - a.n);
         const behind = ds > 0 ? a : b;
         if (fixed(behind)) continue;              // it is already stopped
         // Recorded, not applied. **Once per car, not once per neighbour.**
@@ -802,6 +873,20 @@ export class Race {
       }
     }
     for (const [car, keep] of slow) car.speed *= Math.pow(keep, dt);
+    for (const [car, v] of brake) car.speed = Math.min(car.speed, v);
+  }
+
+  /**
+   * Move a car along its own road, keeping its race position honest.
+   *
+   * On the circuit `progress` is accumulated from driving, so a shove has to
+   * be added to it as well or the running order stops matching where the car
+   * actually is. On the pit ribbon `progress` is *mapped* from `s` (see
+   * `PitRoad.lapAt`) and follows by itself.
+   */
+  shove(car, d) {
+    car.s = car.road.wrap(car.s + d);
+    if (!car.onPit) car.progress += d;
   }
 
   /** How much further this car can move towards `sign` before leaving the road. */

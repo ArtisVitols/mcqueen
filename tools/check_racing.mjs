@@ -231,7 +231,18 @@ for (const physics of Object.keys(PHYSICS)) {
   // eighteen-car field a mediocre driver gets swallowed by traffic now and
   // then, and under Pro the "player" here *is* a mediocre driver. What Easy
   // must not do is take places back off you repeatedly.
-  if (e.lost > EASY_LOST) {
+  //
+  // **Only where the aid actually runs**, which is Sport - the model this is
+  // played on. `driverAid` returns immediately under Pro (`assisted: false`),
+  // so the "aided" player there has no aid at all and is simply a driver in
+  // traffic. And Arcade has no grip limit, so its field runs as one train:
+  // once cars became solid there is no way through a queue where everybody is
+  // going the same speed, and a car in the middle of it changes places every
+  // time the concertina moves. Neither is a mode anybody can select, and
+  // neither says anything about whether a child can win.
+  if (!PHYSICS[physics].assisted || physics === 'arcade') {
+    console.log(`  (${physics}: no aid to measure - ${e.lost} place(s) lost on Easy)`);
+  } else if (e.lost > EASY_LOST) {
     console.log(`  ! ${physics}: Easy took ${e.lost} place(s) back off the player`);
     failed++;
   }
