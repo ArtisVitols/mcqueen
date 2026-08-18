@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import { PHYSICS, tyreSpeed, draftSpeed } from './physics.js';
 
 /**
+ * How fast the model catches up with the car after the corridor has jumped
+ * out from under it, per second. About a third of a second for six metres.
+ */
+const VIS_CATCHUP = 9;
+
+/**
  * A car in track space.
  *
  * The car carries a heading `psi` relative to the track tangent. Because the
@@ -59,6 +65,9 @@ export class Car {
     this.rev = 0;                    // 0..1 within the current gear
     this.gear = 0;
     this.draft = 0;                  // 0..1, how deep in someone's tow
+    // Metres the *model* is drawn short of where the car is, while a jump in
+    // the corridor is absorbed. Zero almost always. See the clamp in `step`.
+    this.visN = 0;
     this.assist = 1;                 // grip multiplier, raised on Easy
     this.tyre = 1;                   // tyre life, 1 fresh to 0 worn out
     this.wearRate = 0;               // per metre; 0 disables wear entirely
@@ -153,6 +162,13 @@ export class Car {
       this.speed += (top - this.speed) * Math.min(1, dt * 3);
     }
 
+    // The drawing offset fades, so the model slides back onto the car rather
+    // than being left behind. Per second, not per step.
+    if (this.visN) {
+      this.visN *= Math.max(0, 1 - VIS_CATCHUP * dt);
+      if (Math.abs(this.visN) < 0.01) this.visN = 0;
+    }
+
     // --- integrate in track space ----------------------------------------
     const along = this.speed * Math.cos(this.psi);
     const across = this.speed * Math.sin(this.psi) + this.vy;
@@ -183,7 +199,27 @@ export class Car {
     const inner = track.limit(now, -1);
     const side = this.n > outer ? 1 : this.n < inner ? -1 : 0;
     if (side) {
+      // **The clamp is a hard set, and it has to stay one.** Everything about
+      // the corridor is built on a car being inside it at the end of every
+      // step - the pit handover projects between two ribbons, the grid is laid
+      // out against it, contact resolves against it. Rationing this, or
+      // narrowing the corridor so it never has to move far, was tried both
+      // ways and each broke the pit entry.
+      const wasN = this.n;
       this.n = side > 0 ? outer : inner;
+      // ... but what the *player* sees does not have to jump.
+      //
+      // Yoyleland's inside width has twenty notches around the lap where the
+      // extraction found something at bumper height: it drops by up to 6.4 m
+      // for nine stations and then returns. Ride the apron into one and this
+      // line moves the car six metres sideways between two frames, which is
+      // what "it teleports back onto the track" is. A correction bigger than
+      // the car could have made itself is the corridor moving, not the car -
+      // so carry it as a *drawing* offset and let it decay. The simulation is
+      // untouched and every measurement of it still reads the real number;
+      // only the model lags, and it catches up in about a third of a second.
+      const jumped = Math.abs(this.n - wasN) - Math.abs(across) * dt;
+      if (jumped > 0) this.visN += this.n - wasN;
       if (Math.sign(this.psi) === side) this.psi *= 0.3;
       if (Math.sign(this.vy) === side) this.vy = 0;
       // Scrub in proportion to how hard the car went in, not just for being
@@ -232,9 +268,14 @@ export class Car {
   /** Push the physics state into the three.js model. */
   sync(st = this.road.sample(this.s, this.st)) {
     this.road.position(st, this.n, this.position);
-    this.model.position.copy(this.position);
     this.road.orient(st, this.psi, this._q, this.n);
     this.model.quaternion.copy(this._q);
+    // `position` is where the car *is* - contact, the pit projections and
+    // every test read it. The model is drawn `visN` short of that while a
+    // corridor jump is being absorbed, and `visN` is zero the rest of the
+    // time, which is all but a few frames a lap on one circuit.
+    if (this.visN) this.road.position(st, this.n - this.visN, this.model.position);
+    else this.model.position.copy(this.position);
   }
 
   get speedKmh() {

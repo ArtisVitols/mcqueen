@@ -1461,6 +1461,36 @@ entry is correct; a car floating over the gap is not.
     still hold. Pro was already exempt: `driverAid` returns immediately under
     it, so its "aided" player has no aid at all. The alternative was to make
     cars passable again, which is the bug this started from.
+- **A car that goes off and rejoins must not appear to teleport - and the fix
+  is in the *drawing*, not the physics.** Yoyleland's inside corridor has
+  twenty notches around the lap: the width drops by up to 6.4 m for exactly
+  nine stations and then returns, which is the barrier walk finding something
+  at bumper height rather than the road changing. `Car.step` keeps a car inside
+  by *setting* `n` to the edge, so ride the apron into a notch and the car is
+  moved six metres sideways between two frames. Measured: 1.63 m in a single
+  frame, 26 times in one lap.
+  - **Two physics fixes were tried and both broke the pit stops**, which is
+    the thing to know before trying a third. Tapering the corridor so it cannot
+    narrow faster than 0.15 m a station removed the jump completely and cost
+    0.24 m of average width - and that was enough to move the inside line away
+    from the pit ribbon, so `project` landed outside the pit road and **not one
+    car could pit**. Rationing the clamp instead left cars up to 3.16 m outside
+    the corridor for 0.2 s, and the handover then moved them 5 m. The corridor
+    being exact at the end of every step is load-bearing: the pit handover
+    projects between two ribbons against it, the grid is laid out against it,
+    contact resolves against it.
+  - **So the simulation is untouched and only the model lags.** `sync` already
+    writes two things - `car.position`, which contact, the pit projections and
+    every test read, and the model's transform, which is what a person sees. A
+    clamp correction bigger than the car could have made itself is the corridor
+    moving rather than the car, so that amount is carried as `visN` and decays
+    over about a third of a second. The car is still clamped exactly; it just
+    does not snap on screen. Model movement over a lap of the apron went from
+    1.63 m in a frame to 0.06 m of sideways in a frame, and every check that
+    measures the physics reads exactly what it read before.
+  - The notches are bad extraction data - the same defect behind Yoyleland's
+    10 barriers and 20 holes in `check_barriers`. Re-deriving that corridor is
+    the real cure and is a separate job; this makes the game handle it.
 - **A touch must not end somebody's race.** Contact bled 35-40% of a car's
   speed *per second* and shoved it sideways at 6 m/s, which on an oval - where
   the whole point is running side by side - made close racing something to
